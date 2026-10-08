@@ -28,7 +28,12 @@ function outputLabel(item) {
     }
   }
   const artifact = item.data
-  return { title: artifact.title || 'Output', subtitle: TYPE_LABEL[artifact.type] || artifact.type }
+  const rowCount = artifact.rows?.length || artifact.row_count
+  let subtitle = TYPE_LABEL[artifact.type] || artifact.type
+  if (rowCount) {
+    subtitle = artifact.type === 'map' ? `Map · ${rowCount} monitors` : `Table · ${rowCount} rows`
+  }
+  return { title: artifact.title || 'Output', subtitle }
 }
 
 const API_BASE = '/api'
@@ -387,8 +392,17 @@ function MessageBubble({
   }
 
   const handleArtifactCardClick = (artifact) => {
-    if (comparing) return // table artifacts aren't comparable in T28
-    onFocusOutput({ kind: 'artifact', data: artifact })
+    if (!comparing) {
+      onFocusOutput({ kind: 'artifact', data: artifact })
+      return
+    }
+    if (!isChartComparable(artifact, compareSelection)) return
+    const alreadyIn = slotIndexOf(compareSelection, artifact) !== -1
+    if (!alreadyIn && isSelectionFull(compareSelection)) {
+      onCompareCapFull()
+      return
+    }
+    onToggleCompareSlot(artifact)
   }
 
   return (
@@ -548,7 +562,8 @@ function MessageBubble({
                 key={artifact.id || `artifact-${i}`}
                 item={{ kind: 'artifact', data: artifact }}
                 active={!comparing && focusedOutput?.kind === 'artifact' && focusedOutput.data === artifact}
-                inert={comparing}
+                inert={comparing && !isChartComparable(artifact, compareSelection)}
+                slotBadge={comparing ? compareBadgeLabel(compareSelection, artifact) : null}
                 onClick={() => handleArtifactCardClick(artifact)}
               />
             ))}
