@@ -18,6 +18,8 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Iterable
+from typing import Any
 
 from tta_backend.config.settings import get_settings
 
@@ -76,6 +78,33 @@ def read_overlay(stored_path: str) -> bytes | None:
         return None
     _touch(path)
     return content
+
+
+def chart_overlay_paths(payload: dict[str, Any]) -> list[str]:
+    """Every overlay path a chart payload records: a map's own overlay, or a
+    comparison's panels and difference panel."""
+    holders: list[Any] = [payload.get("overlay")]
+    if payload.get("type") == "heatmap_multi":
+        holders += [panel.get("overlay") for panel in payload.get("panels") or [] if isinstance(panel, dict)]
+        difference = payload.get("difference")
+        if isinstance(difference, dict):
+            holders.append(difference.get("overlay"))
+    return [h["_path"] for h in holders if isinstance(h, dict) and h.get("_path")]
+
+
+def delete_overlays(stored_paths: Iterable[str]) -> int:
+    """Delete the named overlays. Returns how many were removed.
+
+    Paths resolve by entry name inside the store, as in :func:`read_overlay`,
+    so nothing outside the store can be named. An overlay already gone is
+    skipped.
+    """
+    removed = 0
+    for stored_path in stored_paths:
+        path = _resolve(stored_path)
+        if path is not None and _remove(path):
+            removed += 1
+    return removed
 
 
 def sweep_store() -> None:

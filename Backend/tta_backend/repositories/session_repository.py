@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 from tta_backend.repositories.artifact_repository import delete_artifacts_for_session
@@ -9,7 +11,10 @@ from tta_backend.repositories.session_metadata_repository import (
     list_session_metadata,
     session_belongs_to_user,
 )
+from tta_backend.services import overlay_store
 from tta_backend.utils.db import pg_connection
+
+logger = logging.getLogger(__name__)
 
 
 class SessionRepository:
@@ -39,7 +44,17 @@ class SessionRepository:
                     (thread_id,),
                 )
             await conn.commit()
-        await delete_charts_for_session(thread_id, user_id)
+        deleted_charts = await delete_charts_for_session(thread_id, user_id)
+        # The overlay PNGs after the rows that name them, so a surviving chart
+        # never loses its overlay. Best effort: a PNG left behind here is an
+        # orphan the store's LRU cap reclaims, not a reason to stop before the
+        # ownership row.
+        overlay_paths = [p for chart in deleted_charts for p in overlay_store.chart_overlay_paths(chart)]
+        if overlay_paths:
+            try:
+                await asyncio.to_thread(overlay_store.delete_overlays, overlay_paths)
+            except Exception:
+                logger.warning("session_overlay_delete_failed", extra={"_thread_id": thread_id}, exc_info=True)
         await delete_artifacts_for_session(thread_id, user_id)
         # Last: once this row is gone the thread is unauthorisable, so
         # nothing that still needs authorising may follow it.

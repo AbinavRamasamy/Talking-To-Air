@@ -197,5 +197,80 @@ class RenderPathTests(OverlayStoreTestCase):
         self.assertIsNotNone(read_overlay(second))
 
 
+class ChartOverlayPathsTests(unittest.TestCase):
+    """Every overlay a chart payload records, whatever its shape. Missing one
+    here means deleting the chart leaves that PNG on disk."""
+
+    def test_a_single_map_names_its_overlay(self):
+        from tta_backend.services.overlay_store import chart_overlay_paths
+
+        payload = {"type": "heatmap", "overlay": {"_path": "/s/a.png", "url": "/chart/x/overlay.png"}}
+
+        self.assertEqual(chart_overlay_paths(payload), ["/s/a.png"])
+
+    def test_a_comparison_names_every_panel_and_the_difference(self):
+        from tta_backend.services.overlay_store import chart_overlay_paths
+
+        payload = {
+            "type": "heatmap_multi",
+            "panels": [{"overlay": {"_path": "/s/p0.png"}}, {"overlay": {"_path": "/s/p1.png"}}],
+            "difference": {"overlay": {"_path": "/s/d.png"}},
+        }
+
+        self.assertEqual(sorted(chart_overlay_paths(payload)), ["/s/d.png", "/s/p0.png", "/s/p1.png"])
+
+    def test_charts_without_a_rendered_overlay_name_nothing(self):
+        from tta_backend.services.overlay_store import chart_overlay_paths
+
+        for payload in (
+            {"type": "timeseries"},
+            {"type": "heatmap", "overlay": {}},
+            {"type": "heatmap", "overlay": None},
+            {"type": "heatmap_multi", "panels": [None, {"overlay": {}}], "difference": None},
+        ):
+            with self.subTest(payload=payload):
+                self.assertEqual(chart_overlay_paths(payload), [])
+
+
+class DeleteOverlaysTests(OverlayStoreTestCase):
+    def test_deletes_the_named_overlays_and_leaves_the_rest(self):
+        from tta_backend.services.overlay_store import delete_overlays, read_overlay, write_overlay
+
+        doomed = [write_overlay(png(1)), write_overlay(png(2))]
+        kept = write_overlay(png(3))
+
+        self.assertEqual(delete_overlays(doomed), 2)
+
+        for path in doomed:
+            self.assertIsNone(read_overlay(path))
+        self.assertEqual(read_overlay(kept), png(3))
+
+    def test_an_already_missing_overlay_is_not_an_error(self):
+        from tta_backend.services.overlay_store import delete_overlays, write_overlay
+
+        path = write_overlay(png(1))
+        delete_overlays([path])
+
+        self.assertEqual(delete_overlays([path]), 0)
+
+    def test_never_deletes_a_file_that_is_not_a_store_entry(self):
+        """Paths come from chart payloads in the database. Like reads, a
+        delete resolves them by entry name inside the store, so nothing
+        outside it can be named."""
+        from tta_backend.services.overlay_store import delete_overlays
+
+        os.makedirs(self.store_root, exist_ok=True)
+        outside = os.path.join(self._store.name, "notes.png")
+        inside_not_entry = os.path.join(self.store_root, "notes.png")
+        for path in (outside, inside_not_entry):
+            with open(path, "wb") as f:
+                f.write(b"keep")
+
+        self.assertEqual(delete_overlays([outside, inside_not_entry, "../notes.png", ""]), 0)
+
+        self.assertTrue(os.path.exists(outside))
+        self.assertTrue(os.path.exists(inside_not_entry))
+
+
 if __name__ == "__main__":
     unittest.main()

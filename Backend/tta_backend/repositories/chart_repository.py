@@ -122,10 +122,14 @@ async def get_charts(chart_ids: list[str], user_id: str) -> dict[str, dict[str, 
     return charts
 
 
-async def delete_charts_for_session(thread_id: str, user_id: str) -> None:
+async def delete_charts_for_session(thread_id: str, user_id: str) -> list[dict[str, Any]]:
+    """Delete the session's charts and return their payloads, which are the
+    only record of the overlay files they named."""
     async with pg_connection() as conn:
-        await conn.execute(
-            "DELETE FROM agent_charts WHERE thread_id = %s AND user_id = %s",
+        cursor = await conn.execute(
+            "DELETE FROM agent_charts WHERE thread_id = %s AND user_id = %s RETURNING payload",
             (thread_id, user_id),
         )
+        rows = await cursor.fetchall()
         await conn.commit()
+    return [row[0] for row in rows]
