@@ -49,6 +49,7 @@ _variable_choice_emitter: ContextVar[Optional[Callable[[dict[str, Any]], None]]]
 )
 _current_thread_id: ContextVar[Optional[str]] = ContextVar("current_thread_id", default=None)
 _current_user_id: ContextVar[Optional[str]] = ContextVar("current_user_id", default=None)
+_current_user_message: ContextVar[Optional[str]] = ContextVar("current_user_message", default=None)
 _call_budget: ContextVar[Optional[dict[str, Any]]] = ContextVar("call_budget", default=None)
 # Per-turn MCP transport-failure circuit breaker state (storm containment,
 # 2026-07-20). A mutable dict {"consecutive": int, "tripped": bool} bound once
@@ -182,6 +183,25 @@ def current_user_id() -> str | None:
     """The authenticated user for the active request — the workspace_id
     earthdata-retrieval MCP tools bind their calls to (see earthdata_mcp.workspace)."""
     return _current_user_id.get()
+
+
+def current_user_message() -> str | None:
+    """The researcher's message for the active chat turn, exactly as sent.
+    T64 D6: the dispatch layer puts this in front of every sub-agent task, so
+    the researcher's own words reach the sub-agent without the supervisor
+    model writing them."""
+    return _current_user_message.get()
+
+
+@contextmanager
+def user_message_context(message: str) -> Iterator[None]:
+    """Bind ``current_user_message()`` for one chat turn (see
+    ChatStreamService.stream_chat_events)."""
+    token = _current_user_message.set(message)
+    try:
+        yield
+    finally:
+        _current_user_message.reset(token)
 
 
 @contextmanager

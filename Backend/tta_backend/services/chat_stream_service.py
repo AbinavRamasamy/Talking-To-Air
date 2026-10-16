@@ -27,7 +27,7 @@ from tta_backend.services.retrieval_composites import TERMINAL_STATUSES
 from tta_backend.services.subagent_dispatch import run_ground, run_satellite
 from tta_backend.utils import streaming
 from tta_backend.utils.message_utils import flatten_text_content
-from tta_backend.utils.streaming import stream_response, user_id_context
+from tta_backend.utils.streaming import stream_response, user_id_context, user_message_context
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,12 @@ class ChatStreamService:
         # actually watching. Wrapping both routes here (the fast path is
         # dispatched from inside this block) is what makes "never start a cube
         # during a turn" true rather than aspirational.
-        with user_id_context(user_id), cube_cache.active_turn():
+        #
+        # T64 D6: the researcher's message is bound here, not taken from
+        # stream_response's input, because on the fast path the outermost
+        # stream_response is the sub-agent's own, whose input is the
+        # date-and-context-enriched task rather than what the researcher sent.
+        with user_id_context(user_id), user_message_context(message), cube_cache.active_turn():
             intent = route_intent(message)
             route = "fast_path" if intent in _AGENT_CONSULTED_HEADERS else "supervisor"
             logger.info(

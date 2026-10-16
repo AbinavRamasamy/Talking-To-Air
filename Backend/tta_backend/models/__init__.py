@@ -11,20 +11,42 @@ from .agent_result import (
     parse_chart_payload,
     parse_sub_agent_envelope,
 )
+from .agent_request import (
+    AgentRequest,
+    DispatchArgs,
+    FigureType,
+    GroundIntent,
+    GroundRequest,
+    SatelliteIntent,
+    SatelliteRequest,
+    canonical_key,
+    dispatch_json_schema,
+    render_task,
+)
 from .artifact import ArtifactReference, TableArtifactPayload
 
 __all__ = [
+    "AgentRequest",
     "AgentResult",
     "ArtifactReference",
     "ChartPayload",
+    "DispatchArgs",
+    "FigureType",
+    "GroundIntent",
+    "GroundRequest",
+    "SatelliteIntent",
+    "SatelliteRequest",
     "SubAgentEnvelope",
     "TableArtifactPayload",
     "VariableChoice",
     "VariableChoiceOption",
     "agent_result_to_json",
+    "canonical_key",
     "chart_reference",
+    "dispatch_json_schema",
     "is_chart_reference",
     "parse_agent_result",
     "parse_chart_payload",
     "parse_sub_agent_envelope",
+    "render_task",
 ]
