@@ -89,24 +89,18 @@ COALITIONS: dict[str, _Coalition] = {
     ),
 }
 
-# Alias -> canonical target, which is either a coalition id above or a
-# ``global_regions`` preset key. Hand-curated, never fuzzy-matched (D12):
-# token overlap on a closed vocabulary risks a confident wrong preset, which
-# is worse than a geocode miss.
-#
 # Normalization happens *before* lookup and is ``RegionResolver``'s own
 # (D11a), so "the OTC", "  OTC  " and "otc" all arrive here as "otc" and
 # neither resolver can normalize differently than the other.
 ALIASES: dict[str, str] = {
-    # The Commission is the body; the Region is the boundary. Both spellings
-    # land on the region, because the region is the only one of the two that
-    # has a footprint.
     "otr": "otc",
     "ozone transport commission": "otc",
     "ozone transport region": "otc",
-    # D12: pure phrasing variance. Today "northeastern us" misses the preset
-    # dict entirely and geocodes to a *railway platform* at Northeastern
-    # University in Boston, ~11 m across (Phase 0 gate, V2).
+    "ozone transport commission region": "otc",
+    "ozone transport commission (otc) region": "otc",
+    "ozone transport commission (otc)": "otc",
+    "otc region": "otc",
+    "otr region": "otc",
     "northeastern us": "northeast us",
 }
 

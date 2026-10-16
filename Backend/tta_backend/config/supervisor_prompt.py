@@ -44,6 +44,10 @@ merits, not a partial answer missing a ground check.
 Each subagent has no memory between calls. Every task string must be fully
 self-contained: include location, pollutant, date range, and any prior findings
 the subagent needs to complete the task.
+Write the place name exactly as the user wrote it ("the OTC", "NJ + NY").
+Do not expand acronyms, add words like "region", or append a description of
+where it is — named regions are matched by their exact name, and a rewritten
+name can fail to resolve.
 If a ground result already includes station_name, monitor_name, or local_site_name,
 that is the monitor name; preserve it in follow-up tasks instead of asking for it again.
 

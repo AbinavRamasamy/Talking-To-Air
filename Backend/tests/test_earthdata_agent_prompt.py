@@ -273,5 +273,31 @@ class EarthdataAgentPromptNrtLatencyTests(unittest.TestCase):
         self.assertIn("rolling window", prompt)
 
 
+class EarthdataAgentPromptPlaceNameTests(unittest.TestCase):
+    """On 2026-10-14 the agent sent "Ozone Transport Commission region",
+    "... region Northeast US" and "US Mid-Atlantic and Northeast region" for a
+    request that said "OTC". The AOI step resolves known regions by exact
+    name, so a rewritten name misses and the agent then substitutes another
+    place. The prompt must say to pass the name unchanged and not substitute."""
+
+    def _prompt(self):
+        from tta_backend.config.earthdata_agent_prompt import get_earthdata_agent_prompt
+
+        return " ".join(get_earthdata_agent_prompt().lower().split())
+
+    def test_prompt_tells_the_agent_to_pass_the_place_name_unchanged(self):
+        prompt = self._prompt()
+        step = prompt.index("**define the area**")
+
+        self.assertIn("exactly as the user wrote it", prompt[step:step + 900])
+        self.assertIn("do not expand acronyms", prompt[step:step + 900])
+
+    def test_prompt_forbids_substituting_a_different_place_after_a_rejection(self):
+        prompt = self._prompt()
+        step = prompt.index("**define the area**")
+
+        self.assertIn("never substitute", prompt[step:step + 900])
+
+
 if __name__ == "__main__":
     unittest.main()

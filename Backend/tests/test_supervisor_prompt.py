@@ -42,5 +42,20 @@ class SupervisorPromptT25Phase4Tests(unittest.TestCase):
         self.assertIn("air-quality pollutants only", prompt[routing_idx:routing_idx + 300])
 
 
+class SupervisorPromptPlaceNameTests(unittest.TestCase):
+    """The supervisor expanded "the OTC region" into "the Ozone Transport
+    Commission (OTC) region (northeastern US)" in its delegation, and the
+    subagent sent a spelling the region vocabulary does not hold. The task
+    string must carry the user's place name as written."""
+
+    def test_prompt_tells_the_supervisor_to_pass_place_names_as_written(self):
+        from tta_backend.config.supervisor_prompt import SUPERVISOR_PROMPT
+
+        prompt = " ".join(SUPERVISOR_PROMPT.lower().split())
+
+        self.assertIn("place name exactly as the user wrote it", prompt)
+        self.assertIn("do not expand acronyms", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
