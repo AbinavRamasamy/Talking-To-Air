@@ -10,7 +10,7 @@ same closure pattern as the handle-based plot/statistics tools.
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from langchain.tools import tool
 from langchain_core.tools import BaseTool
@@ -33,7 +33,6 @@ def make_safe_retrieve(mcp_tools: dict[str, BaseTool]) -> BaseTool:
         aoi_handle: str,
         time_range: str,
         variables: list[str],
-        output_format: Optional[str] = None,
         confirmed: bool = False,
     ) -> str:
         """
@@ -53,7 +52,6 @@ def make_safe_retrieve(mcp_tools: dict[str, BaseTool]) -> BaseTool:
             aoi_handle     : aoi_ handle from define_area_of_interest.
             time_range     : ISO 8601 interval, e.g. '2024-01-01/2024-01-31'.
             variables      : variable short names to retrieve.
-            output_format  : optional output format hint.
             confirmed      : set True only after the researcher has approved
                               a prior "needs_confirmation" response.
         """
@@ -64,7 +62,6 @@ def make_safe_retrieve(mcp_tools: dict[str, BaseTool]) -> BaseTool:
                 time_range,
                 variables,
                 mcp_tools,
-                output_format=output_format,
                 confirmed=confirmed,
             )
         except MCPToolError as exc:

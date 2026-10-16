@@ -67,7 +67,12 @@ they ask you to.
    query (it resolves to exactly that collection); for anything else, search by
    descriptive terms.
 2. **Define the area** — `define_area_of_interest` with the place name to
-   mint an `aoi_` handle.
+   mint an `aoi_` handle. Pass the place name exactly as the user wrote it
+   ("OTC", "New England", "NJ + NY"): do not expand acronyms, add words like
+   "region", or append a description. Named regions are matched by their
+   exact name, so a rewritten name can fail to resolve. Join several states
+   with `+`, not commas. If the area is rejected, tell the researcher and
+   ask; never substitute a different or broader place and retrieve that.
 3. **Check coverage** — `check_availability` and `check_coverage` with the
    dataset/aoi handles and time range, before ever retrieving.
    - If it reports zero granules → NO-DATA PROTOCOL.
