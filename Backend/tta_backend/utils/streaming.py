@@ -50,6 +50,7 @@ _variable_choice_emitter: ContextVar[Optional[Callable[[dict[str, Any]], None]]]
 _current_thread_id: ContextVar[Optional[str]] = ContextVar("current_thread_id", default=None)
 _current_user_id: ContextVar[Optional[str]] = ContextVar("current_user_id", default=None)
 _current_user_message: ContextVar[Optional[str]] = ContextVar("current_user_message", default=None)
+_ground_validation_allowed: ContextVar[bool] = ContextVar("ground_validation_allowed", default=True)
 _call_budget: ContextVar[Optional[dict[str, Any]]] = ContextVar("call_budget", default=None)
 # Per-turn MCP transport-failure circuit breaker state (storm containment,
 # 2026-07-20). A mutable dict {"consecutive": int, "tripped": bool} bound once
@@ -202,6 +203,26 @@ def user_message_context(message: str) -> Iterator[None]:
         yield
     finally:
         _current_user_message.reset(token)
+
+
+def ground_validation_allowed() -> bool:
+    """Whether the satellite agent's own ground tools (validate_against_ground,
+    exceedance_overlay) may run for the task in progress. T64: under the
+    supervisor's dispatch, only a satellite request whose intent is compare
+    may; ground data is otherwise the supervisor's to request. True outside a
+    dispatch, so the router fast path keeps every tool."""
+    return _ground_validation_allowed.get()
+
+
+@contextmanager
+def ground_validation_scope(allowed: bool) -> Iterator[None]:
+    """Bind ``ground_validation_allowed()`` for one sub-agent run. Set before
+    the run starts, so every ToolNode gather-Task the run spawns copies it."""
+    token = _ground_validation_allowed.set(allowed)
+    try:
+        yield
+    finally:
+        _ground_validation_allowed.reset(token)
 
 
 @contextmanager

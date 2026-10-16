@@ -28,6 +28,7 @@ from tta_backend.models import (
     DispatchItemResult,
     DispatchResult,
     GroundRequest,
+    SatelliteIntent,
     canonical_key,
     dispatch_json_schema,
     parse_agent_result,
@@ -40,7 +41,12 @@ from tta_backend.services.dispatch_executor import execute_dispatch
 from tta_backend.services.subagent_dispatch import persist_dispatch_contexts, run_ground, run_satellite
 from tta_backend.utils.db import get_checkpointer
 from tta_backend.utils.message_utils import truncate_text
-from tta_backend.utils.streaming import current_thread_id, current_user_id, current_user_message
+from tta_backend.utils.streaming import (
+    current_thread_id,
+    current_user_id,
+    current_user_message,
+    ground_validation_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,9 +128,12 @@ async def build_agent(
             task = render_task(request, user_message)
             if isinstance(request, GroundRequest):
                 return await run_ground(ground_agent, task, thread_id, context_sink=sink)
-            return await run_satellite(
-                satellite_agent, task, thread_id, mcp_manager=mcp_manager, context_sink=sink,
-            )
+            # The satellite agent's own ground tools are for a comparison only;
+            # any other ground data is a ground request the supervisor makes.
+            with ground_validation_scope(request.intent == SatelliteIntent.COMPARE):
+                return await run_satellite(
+                    satellite_agent, task, thread_id, mcp_manager=mcp_manager, context_sink=sink,
+                )
 
         batch = await execute_dispatch(requests, run_one)
         if thread_id is not None and captured:

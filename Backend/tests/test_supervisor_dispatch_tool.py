@@ -130,6 +130,32 @@ class SupervisorDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual([c["site_id"] for c in persist.call_args.kwargs["ground"]], ["34-007-0002"])
 
+    async def test_only_a_compare_request_lets_the_satellite_agent_use_its_ground_tools(self):
+        """A visualize request that wanders into validate_against_ground is
+        ground work the supervisor never dispatched (live 2026-10-16)."""
+        from tta_backend.utils.streaming import ground_validation_allowed
+
+        class ScopeRecordingSatellite:
+            def __init__(self):
+                self.allowed = {}
+
+            async def astream(self, input_, config, stream_mode):
+                task = input_["messages"][0]["content"]
+                intent = next(line.split(": ", 1)[1] for line in task.splitlines() if line.startswith("Intent:"))
+                self.allowed[intent] = ground_validation_allowed()
+                yield "messages", (SimpleNamespace(content=_envelope("ok"), type="ai", tool_calls=None), {})
+
+        satellite = ScopeRecordingSatellite()
+        tools = await self._tools(FakeGroundAgent(), satellite)
+
+        await tools["dispatch"].ainvoke({"requests": [
+            {"agent": "satellite", "intent": "visualize", "figure_type": "map", "variable": "NO2", "location": "NJ"},
+            {"agent": "satellite", "intent": "compare", "variable": "NO2", "location": "NJ"},
+        ]})
+
+        self.assertEqual(satellite.allowed, {"visualize": False, "compare": True})
+        self.assertTrue(ground_validation_allowed())
+
     async def test_an_invalid_dispatch_goes_back_to_the_model_as_an_error_and_runs_nothing(self):
         """Seven requests, one over the schema cap: the turn must not crash,
         and the model must be told why so it can resend a valid call."""

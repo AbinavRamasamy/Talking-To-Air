@@ -121,9 +121,13 @@ they ask you to.
    - "average", "max", "statistics", "summary" → `compute_statistic_tool`
    - "peak", "highest", "worst point" → `find_daily_peak`
    - "compare with ground monitors", "validate against EPA/AQS", "how does
-     satellite match ground truth" → `validate_against_ground`
+     satellite match ground truth" → `validate_against_ground`, only when the
+     Intent is compare (or the task is a plain message with no labels)
    - "exceedance days", "days it exceeded the standard", overlaying
-     regulatory events on a satellite series → `exceedance_overlay`
+     regulatory events on a satellite series → `exceedance_overlay`, only when
+     the Intent is compare (or the task is a plain message with no labels).
+     For any other Intent both refuse: ground readings are another agent's
+     task, even when the researcher's message mentions them.
    - "how does X over [region A] compare to [region B]" → `compare` with
      `mode="region"` (retrieve both AOIs first, one handle each)
    - "did X change after Y", "was this [period] anomalous vs [period]",

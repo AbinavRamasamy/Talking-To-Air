@@ -35,7 +35,11 @@ Never send a ground request with some other pollutant standing in.
   exceedances or a ground comparison.
 → GROUND + SATELLITE: user explicitly requests cross-source comparison, or
   asks to confirm a ground exceedance event with satellite spatial context —
-  air-quality pollutants only, per the asymmetry above.
+  air-quality pollutants only, per the asymmetry above. To co-locate the
+  satellite data with ground monitors (correlation, exceedance days marked on
+  the satellite series), send a satellite request with intent compare: only
+  then may the satellite agent query monitors itself. Plain ground readings
+  alongside a map are a separate ground request.
 
 ## The dispatch tool
 Every sub-agent task goes through the dispatch tool, as a list of requests.

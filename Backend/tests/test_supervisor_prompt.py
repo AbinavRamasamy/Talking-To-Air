@@ -99,6 +99,15 @@ class SupervisorPromptDispatchTests(unittest.TestCase):
 
         self.assertIn("even for an air-quality pollutant", prompt)
 
+    def test_a_satellite_vs_ground_co_location_is_a_satellite_compare_request(self):
+        """The satellite agent's ground tools run only for intent compare, so
+        the supervisor must know that is how to ask for them."""
+        from tta_backend.config.supervisor_prompt import SUPERVISOR_PROMPT
+
+        prompt = " ".join(SUPERVISOR_PROMPT.lower().split())
+
+        self.assertIn("satellite request with intent compare", prompt)
+
     def test_a_dependent_task_goes_in_a_second_round_with_prior_findings(self):
         from tta_backend.config.supervisor_prompt import SUPERVISOR_PROMPT
 
