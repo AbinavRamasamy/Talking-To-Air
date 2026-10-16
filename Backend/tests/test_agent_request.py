@@ -99,6 +99,32 @@ class DispatchJsonSchemaTests(unittest.TestCase):
 
         self.assertFalse(keys & {"oneOf", "discriminator", "additionalProperties"})
 
+    def test_every_intent_value_is_described_where_the_model_reads_it(self):
+        """Live 2026-10-16: seeing only bare enum names, the supervisor
+        labelled "NO2 map plus ground readings" compare, which unlocks the
+        satellite agent's own ground tools."""
+        from tta_backend.models.agent_request import GroundIntent, SatelliteIntent, dispatch_json_schema
+
+        defs = dispatch_json_schema()["$defs"]
+
+        for enum in (SatelliteIntent, GroundIntent):
+            description = defs[enum.__name__]["description"]
+            for value in enum:
+                with self.subTest(intent=value.value):
+                    self.assertIn(f"{value.value}:", description)
+
+    def test_a_map_with_ground_readings_alongside_is_visualize_not_compare(self):
+        from tta_backend.models.agent_request import dispatch_json_schema
+
+        lines = {
+            line.split(":", 1)[0].strip(): line
+            for line in dispatch_json_schema()["$defs"]["SatelliteIntent"]["description"].splitlines()
+            if ":" in line
+        }
+
+        self.assertIn("separate ground request", lines["visualize"])
+        self.assertIn("only when the researcher asks", lines["compare"])
+
 
 def _requests(*items):
     from tta_backend.models.agent_request import DispatchArgs

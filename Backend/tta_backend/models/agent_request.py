@@ -14,7 +14,20 @@ from typing import Annotated, Any, Literal, cast
 from pydantic import BaseModel, Field
 
 
+# The intent enums' docstrings are the descriptions the model reads in the
+# dispatch schema ($defs), one line per value: keep them model-facing. They
+# sit on the enum, not the field, so each intent field stays a bare $ref --
+# the shape the T64 Phase 0 gate verified.
 class SatelliteIntent(StrEnum):
+    """What the satellite request is for.
+    visualize: a map, time series or vertical profile of the variable, also when ground readings are wanted alongside; those are a separate ground request.
+    statistic: numbers about the variable over the area and dates (mean, max, peak location), no ground data.
+    compare: two periods, regions or variables; or checking the satellite data against ground monitors, only when the researcher asks for that check.
+    explain_reliability: how far to trust a chart already plotted (quality flags, coverage).
+    availability: whether data exists for the variable, area and dates.
+    discover: which datasets or variables exist for a topic.
+    """
+
     VISUALIZE = "visualize"
     STATISTIC = "statistic"
     COMPARE = "compare"
@@ -36,6 +49,14 @@ class FigureType(StrEnum):
 
 
 class GroundIntent(StrEnum):
+    """What the ground request is for.
+    nearest_monitor: the monitor(s) closest to a place.
+    site_info: details of a named monitor or station.
+    readings: daily or hourly values, or the AQI, for a place and dates.
+    summary: quarterly or annual summaries.
+    exceedances: days a monitor exceeded the pollutant's regulatory standard.
+    """
+
     NEAREST_MONITOR = "nearest_monitor"
     SITE_INFO = "site_info"
     READINGS = "readings"
