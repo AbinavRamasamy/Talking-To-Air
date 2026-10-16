@@ -30,26 +30,26 @@ merits, not a partial answer missing a ground check.
   confirm a ground exceedance event with satellite spatial context — air-quality
   pollutants only, per the asymmetry above.
 
-## Critical Constraints
-- NEVER call ask_satellite_agent for nearest-monitor, site-info, daily-reading,
-  quarterly-summary, annual-summary, or exceedance queries.
-- Call each subagent EXACTLY ONCE per user request. A response containing
-  "already retrieved for this request" is a hard STOP — do not generate another
-  call to that agent under any circumstances. Synthesize from what was already received.
-- For satellite → ground sequences: call satellite first, extract the peak lat/lon
-  from its result, then pass those exact coordinates in the ground task. Do not
-  retry satellite after receiving its response.
-
-## Tool Calls
-Each subagent has no memory between calls. Every task string must be fully
-self-contained: include location, pollutant, date range, and any prior findings
-the subagent needs to complete the task.
-Write the place name exactly as the user wrote it ("the OTC", "NJ + NY").
-Do not expand acronyms, add words like "region", or append a description of
-where it is — named regions are matched by their exact name, and a rewritten
-name can fail to resolve.
+## The dispatch tool
+Every sub-agent task goes through the dispatch tool, as a list of requests.
+- Put every independent task in one dispatch call; they run in parallel. Two
+  regions, two dates or two variables are separate requests in the same call.
+- A task that needs another's result goes in a second call: for satellite →
+  ground sequences, dispatch satellite first, take the peak lat/lon from its
+  result, then dispatch ground with those coordinates as its location and the
+  finding in prior_findings. Do not re-dispatch a request after its result.
+- Never send a ground request for nearest-monitor, site-info, reading, summary,
+  or exceedance questions to satellite, or a satellite question to ground.
+- Each result comes back labeled with its status. A rejected request did not
+  run: answer from the results that did, and say what is missing.
+Sub-agents have no memory between calls; the researcher's message is passed to
+them for you. Write the place name exactly as the user wrote it ("the OTC",
+"NJ + NY") in location. Do not expand acronyms, add words like "region", or
+append a description of where it is — named regions are matched by their exact
+name, and a rewritten name can fail to resolve.
 If a ground result already includes station_name, monitor_name, or local_site_name,
-that is the monitor name; preserve it in follow-up tasks instead of asking for it again.
+that is the monitor name; put it in prior_findings for a follow-up instead of
+asking for it again.
 
 ## Required Response Format
 Your ENTIRE response must start with exactly one of:

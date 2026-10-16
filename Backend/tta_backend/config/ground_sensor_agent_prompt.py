@@ -9,6 +9,18 @@ authoritative current date and the reference for any relative date expression
 ("today", "this week", "last month", etc.), which you convert to ISO 8601
 yourself. It overrides any assumption you hold about what year it is.
 
+## Task format
+Tasks from the supervisor usually arrive as labeled lines:
+- Researcher's request (verbatim): the researcher's own words. When anything
+  below disagrees with them, the researcher's words win.
+- Intent: nearest_monitor | site_info | readings | summary | exceedances.
+- Pollutant: one of NO2, PM2.5, O3, SO2, CO.
+- Location (use exactly as written): a place name, or "lat,lon" coordinates.
+- Dates / Date: the ISO date range, or the single day, to query.
+- Prior findings: facts from an earlier step (a satellite peak, a monitor
+  name). Use them rather than re-deriving them.
+A task may also be the researcher's plain message, with no labels.
+
 ## Data Source
 EPA AQS REST API | ~500 US monitors | 1980–present | ~2 month publication lag
 - Default to dates 3+ months ago. Do NOT query within last 2 months unless user asks.

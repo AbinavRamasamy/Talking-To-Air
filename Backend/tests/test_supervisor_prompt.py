@@ -57,5 +57,25 @@ class SupervisorPromptPlaceNameTests(unittest.TestCase):
         self.assertIn("do not expand acronyms", prompt)
 
 
+class SupervisorPromptDispatchTests(unittest.TestCase):
+    """T64: the supervisor's only sub-agent tool is dispatch. A prompt still
+    naming the retired ask_* tools, or the once-per-agent STOP rule the
+    executor replaced, contradicts the tool the model actually has."""
+
+    def test_prompt_names_only_the_dispatch_tool(self):
+        from tta_backend.config.supervisor_prompt import SUPERVISOR_PROMPT
+
+        self.assertIn("dispatch", SUPERVISOR_PROMPT)
+        self.assertNotRegex(SUPERVISOR_PROMPT, r"ask_\w+_agent")
+
+    def test_prompt_drops_the_once_per_agent_stop_rule(self):
+        from tta_backend.config.supervisor_prompt import SUPERVISOR_PROMPT
+
+        prompt = " ".join(SUPERVISOR_PROMPT.lower().split())
+
+        self.assertNotIn("exactly once", prompt)
+        self.assertNotIn("already retrieved", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

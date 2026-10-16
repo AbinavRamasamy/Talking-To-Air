@@ -1,6 +1,8 @@
 from .agent_result import (
     AgentResult,
     ChartPayload,
+    DispatchItemResult,
+    DispatchResult,
     SubAgentEnvelope,
     VariableChoice,
     VariableChoiceOption,
@@ -9,7 +11,9 @@ from .agent_result import (
     is_chart_reference,
     parse_agent_result,
     parse_chart_payload,
+    parse_dispatch_result,
     parse_sub_agent_envelope,
+    parse_tool_results,
 )
 from .agent_request import (
     AgentRequest,
@@ -31,6 +35,8 @@ __all__ = [
     "ArtifactReference",
     "ChartPayload",
     "DispatchArgs",
+    "DispatchItemResult",
+    "DispatchResult",
     "FigureType",
     "GroundIntent",
     "GroundRequest",
@@ -47,6 +53,8 @@ __all__ = [
     "is_chart_reference",
     "parse_agent_result",
     "parse_chart_payload",
+    "parse_dispatch_result",
     "parse_sub_agent_envelope",
+    "parse_tool_results",
     "render_task",
 ]

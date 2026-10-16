@@ -122,9 +122,8 @@ class FastPathHeartbeatTests(unittest.IsolatedAsyncioTestCase):
     """
 
     async def asyncSetUp(self):
-        from tta_backend.services import subagent_dispatch
-
-        subagent_dispatch.get_call_budget().clear()
+        from tta_backend.utils.streaming import get_call_budget
+        get_call_budget().clear()
 
     async def test_a_silent_ground_turn_still_writes_while_it_thinks(self):
         import tta_backend.utils.streaming as streaming

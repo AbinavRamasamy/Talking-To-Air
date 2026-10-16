@@ -168,5 +168,67 @@ class RetryCeilingTests(unittest.TestCase):
             self.assertEqual(Settings().llm_max_retries, 0)
 
 
+class GeminiNativeToolSchemaTests(unittest.TestCase):
+    """T64 Phase 0 F1/F3: langchain_google_genai's converter reduces a list of
+    union items to STRING/OBJECT, and its bind_tools cannot carry a raw JSON
+    schema. A tool that names its own JSON schema must reach the request
+    untouched, bound the way create_agent binds (bind_tools(tools, tool_choice=...))."""
+
+    def _declarations(self, tools):
+        from langchain_core.messages import HumanMessage
+
+        from tta_backend.config.model_factory import build_chat_model
+        from tta_backend.config.settings import Settings
+
+        model = build_chat_model("google", "gemini-3.5-flash-lite", Settings(google_api_key="offline"))
+        bound = model.bind_tools(tools, tool_choice=None)
+        request = model._prepare_request([HumanMessage("hi")], **bound.kwargs)
+        return {fd.name: fd for tool in request["config"].tools for fd in tool.function_declarations or []}
+
+    def test_a_tool_carrying_a_native_json_schema_reaches_gemini_verbatim(self):
+        from langchain_core.tools import StructuredTool
+
+        from tta_backend.config.model_factory import NATIVE_JSON_SCHEMA
+        from tta_backend.models.agent_request import DispatchArgs, dispatch_json_schema
+
+        async def _noop(**_):
+            return ""
+
+        dispatch = StructuredTool.from_function(
+            coroutine=_noop, name="dispatch", description="Dispatch tasks.", args_schema=DispatchArgs,
+            metadata={NATIVE_JSON_SCHEMA: dispatch_json_schema()},
+        )
+
+        declaration = self._declarations([dispatch])["dispatch"]
+
+        self.assertEqual(declaration.parameters_json_schema, dispatch_json_schema())
+        self.assertIsNone(declaration.parameters)
+        self.assertEqual(declaration.description, "Dispatch tasks.")
+
+    def test_an_ordinary_tool_bound_alongside_is_converted_as_before(self):
+        from langchain_core.tools import StructuredTool, tool
+
+        from tta_backend.config.model_factory import NATIVE_JSON_SCHEMA
+        from tta_backend.models.agent_request import DispatchArgs, dispatch_json_schema
+
+        async def _noop(**_):
+            return ""
+
+        dispatch = StructuredTool.from_function(
+            coroutine=_noop, name="dispatch", description="Dispatch tasks.", args_schema=DispatchArgs,
+            metadata={NATIVE_JSON_SCHEMA: dispatch_json_schema()},
+        )
+
+        @tool
+        def lookup(code: str) -> str:
+            """Look a code up."""
+            return code
+
+        declarations = self._declarations([dispatch, lookup])
+
+        self.assertIsNone(declarations["lookup"].parameters_json_schema)
+        self.assertEqual(list(declarations["lookup"].parameters.properties), ["code"])
+
+
 if __name__ == "__main__":
     unittest.main()

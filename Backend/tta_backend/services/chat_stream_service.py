@@ -18,7 +18,7 @@ from tta_backend.config.error_templates import (
 from tta_backend.config.settings import get_settings
 from tta_backend.config.workflow_stages import STAGE_WORKING
 from tta_backend.earthdata_mcp.results import CATEGORY_CONTRACT
-from tta_backend.models import AgentResult, parse_agent_result, parse_chart_payload
+from tta_backend.models import AgentResult, parse_agent_result, parse_chart_payload, parse_tool_results
 from tta_backend.services import admission, cube_cache
 from tta_backend.services.artifact_store import artifact_store
 from tta_backend.services.chart_service import ChartService
@@ -36,14 +36,32 @@ _AGENT_CONSULTED_HEADERS = {
     "SATELLITE": "Agent consulted: SATELLITE",
 }
 
-# T14/history-fix: the supervisor tool a fast-pathed intent stands in for —
-# used so the write-back below reproduces the same tool_call/tool_result
-# shape create_agent's own loop would have produced (see supervisor_agent.py
-# ask_ground_sensor_agent / ask_earthdata_agent).
+# T14/history-fix: the tool name a fast-pathed turn is written back under.
+# These are the supervisor's pre-T64 tools: the write-back keeps their
+# single-AgentResult shape, which history (parse_tool_results) and every
+# vetted supervisor model still read (T64 Phase 0 F6).
 _INTENT_TOOL_NAMES = {
     "GROUND": "ask_ground_sensor_agent",
     "SATELLITE": "ask_earthdata_agent",
 }
+
+
+# The envelope's own cap on follow-ups (AgentResult.suggested_followups).
+_MAX_FOLLOWUPS = 2
+
+
+def _merged_followups(results: list[AgentResult]) -> list[str] | None:
+    """Follow-ups across a tool message's results, in request order, deduped
+    and capped (T64 D13). None when no result offered any -- an empty list
+    would claim the sub-agents offered none."""
+    offered = [r.suggested_followups for r in results if r.suggested_followups is not None]
+    if not offered:
+        return None
+    merged: list[str] = []
+    for suggestion in (s for group in offered for s in group):
+        if suggestion not in merged:
+            merged.append(suggestion)
+    return merged[:_MAX_FOLLOWUPS]
 
 
 @dataclass
@@ -430,9 +448,8 @@ class ChatStreamService:
         logged loudly, never silent.
 
         When the result carries a chart or artifact, writes the same
-        tool_call/ToolMessage/AIMessage shape the supervisor's own agent loop
-        produces for ask_ground_sensor_agent / ask_earthdata_agent
-        (supervisor_agent.py), carrying the AgentResult JSON in the
+        tool_call/ToolMessage/AIMessage shape the supervisor's pre-T64
+        ask_* tools produced, carrying the AgentResult JSON in the
         ToolMessage with each chart reduced to a reference to its
         agent_charts row (ChartService.checkpoint_envelope). HistoryService only ever reconstructs a turn's chart/
         artifact cards from a role=="tool" message (see _attach_tool_output)
@@ -577,29 +594,35 @@ class ChatStreamService:
     ) -> AsyncIterator[str]:
         if emitted_chart_ids is None:
             emitted_chart_ids = set()
-        agent_result = parse_agent_result(content)
-        if agent_result is not None:
-            for artifact_ref in agent_result.artifacts:
-                payload = await self._resolve_artifact_payload(
-                    artifact_ref.model_dump(exclude_none=True), user_id, thread_id,
-                )
-                if payload is None:
-                    continue
-                if artifacts is not None and payload not in artifacts:
-                    artifacts.append(payload)
-                yield self.sse("artifact", payload)
-            for chart in agent_result.charts:
-                event = await self._emit_chart_once(thread_id, chart, user_id, emitted_chart_ids)
-                if event is not None:
-                    yield event
+        # One result for a legacy ask_* message, one per item that ran for a
+        # T64 dispatch batch.
+        agent_results = parse_tool_results(content)
+        if agent_results:
+            for agent_result in agent_results:
+                for artifact_ref in agent_result.artifacts:
+                    payload = await self._resolve_artifact_payload(
+                        artifact_ref.model_dump(exclude_none=True), user_id, thread_id,
+                    )
+                    if payload is None:
+                        continue
+                    if artifacts is not None and payload not in artifacts:
+                        artifacts.append(payload)
+                    yield self.sse("artifact", payload)
+                for chart in agent_result.charts:
+                    event = await self._emit_chart_once(thread_id, chart, user_id, emitted_chart_ids)
+                    if event is not None:
+                        yield event
             # T22 story #8: a sub-agent's suggestions arrive batched inside
             # its final tool_result envelope on the supervisor path — carried
             # through untouched (never synthesized here, story #12).
-            if suggestions_box is not None and agent_result.suggested_followups is not None:
-                suggestions_box["value"] = agent_result.suggested_followups
-            # T49: same discipline for the deterministic variable picker.
-            if variable_choice_box is not None and agent_result.variable_choice is not None:
-                variable_choice_box["value"] = agent_result.variable_choice.model_dump(exclude_none=True)
+            followups = _merged_followups(agent_results)
+            if suggestions_box is not None and followups is not None:
+                suggestions_box["value"] = followups
+            # T49: same discipline for the deterministic variable picker. The
+            # UI shows one picker, so the first item's wins (T64 D13).
+            picker = next((r.variable_choice for r in agent_results if r.variable_choice is not None), None)
+            if variable_choice_box is not None and picker is not None:
+                variable_choice_box["value"] = picker.model_dump(exclude_none=True)
             return
 
         artifact_refs = self._artifact_refs(content)

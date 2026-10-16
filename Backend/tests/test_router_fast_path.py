@@ -86,9 +86,8 @@ def _no_monitor_context():
 @unittest.skipIf(importlib.util.find_spec("langchain") is None, "langchain is not installed")
 class RouterFastPathTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        from tta_backend.services import subagent_dispatch
-
-        subagent_dispatch.get_call_budget().clear()
+        from tta_backend.utils.streaming import get_call_budget
+        get_call_budget().clear()
 
     async def test_ground_only_message_invokes_only_the_ground_agent(self):
         from tta_backend.services.chat_stream_service import ChatStreamService

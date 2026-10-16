@@ -4,6 +4,7 @@ import inspect
 import json
 from typing import Any
 
+from tta_backend.models import parse_dispatch_result
 from tta_backend.services.artifact_store import artifact_store
 from tta_backend.services.chart_service import ChartService
 from tta_backend.utils.message_utils import flatten_text_content
@@ -158,6 +159,13 @@ class HistoryService:
         return merged
 
     def _artifact_refs(self, content: Any) -> list[dict[str, Any]]:
+        batch = parse_dispatch_result(content)
+        if batch is not None:
+            return [
+                ref.model_dump(exclude_none=True)
+                for item in batch.results if item.result is not None
+                for ref in item.result.artifacts
+            ]
         try:
             parsed = json.loads(content) if isinstance(content, str) else content
         except Exception:
@@ -165,7 +173,7 @@ class HistoryService:
         if not isinstance(parsed, dict):
             return []
         # Two formats land in supervisor ToolMessages:
-        #   AgentResult JSON  → key "artifacts"   (ask_ground_sensor_agent return value)
+        #   AgentResult JSON  → key "artifacts"   (pre-T64 ask_* tools, fast-path write-back)
         #   EPA tool results  → key "_artifact_refs" (never stored at supervisor level,
         #                        but kept for safety in case of future tool refactors)
         refs = parsed.get("artifacts") or parsed.get("_artifact_refs") or []

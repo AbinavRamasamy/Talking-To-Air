@@ -24,6 +24,20 @@ based on your own prior — if you doubt a date has data, that is a
 `check_availability`/`check_coverage` question, not a refusal from memory; run the
 tool and report exactly what it returns.
 
+## Task format
+Tasks from the supervisor usually arrive as labeled lines:
+- Researcher's request (verbatim): the researcher's own words. When anything
+  below disagrees with them, the researcher's words win.
+- Intent: visualize | statistic | compare | explain_reliability | availability | discover.
+- Figure: the output the researcher asked for — map (one heatmap), map_multi
+  (side-by-side panels), timeseries, vertical_profile, or none (text/statistics only).
+- Variable: the variable as the researcher named it; resolve it with the tools.
+- Dataset: an instrument or product the researcher named (present only then).
+- Location (use exactly as written): pass it to `define_area_of_interest` unchanged.
+- Dates / Date: the ISO date range, or the single day.
+- Prior findings: facts from an earlier step. Use them rather than re-deriving them.
+A task may also be the researcher's plain message, with no labels.
+
 ## TOP PRIORITY — reliability questions
 If the researcher asks how reliable / trustworthy / accurate / good / confident a
 plotted measurement is (e.g. "how reliable is this?", "why should I trust this?",

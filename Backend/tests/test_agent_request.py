@@ -190,5 +190,43 @@ class RenderTaskTests(unittest.TestCase):
         )
 
 
+class RenderedTaskPromptContractTests(unittest.TestCase):
+    """D7: the sub-agents keep taking a string, so each one's prompt must say
+    what the labeled lines render_task sends mean. A label added to the
+    template without a word in the prompt is a field the agent has to guess."""
+
+    @staticmethod
+    def _labels(task):
+        return [line.split(":", 1)[0] for line in task.splitlines()]
+
+    def test_every_label_a_satellite_task_carries_is_explained_in_the_earthdata_prompt(self):
+        from tta_backend.config.earthdata_agent_prompt import get_earthdata_agent_prompt
+        from tta_backend.models.agent_request import render_task
+
+        (request,) = _requests({
+            "agent": "satellite", "intent": "compare", "figure_type": "map_multi", "variable": "NO2",
+            "dataset": "TEMPO", "location": "the OTC", "start_date": "2024-07-01", "end_date": "2024-07-31",
+            "prior_findings": "exceedance at Camden on 07-12",
+        })
+        prompt = get_earthdata_agent_prompt()
+
+        for label in self._labels(render_task(request, "compare NO2 over the OTC")):
+            with self.subTest(label=label):
+                self.assertIn(label, prompt)
+
+    def test_every_label_a_ground_task_carries_is_explained_in_the_ground_prompt(self):
+        from tta_backend.config.ground_sensor_agent_prompt import GROUND_SYSTEM_PROMPT
+        from tta_backend.models.agent_request import render_task
+
+        (request,) = _requests({
+            "agent": "ground", "intent": "readings", "pollutant": "NO2", "location": "40.71,-74.01",
+            "start_date": "2024-07-01", "end_date": "2024-07-31", "prior_findings": "satellite peak at 40.71,-74.01",
+        })
+
+        for label in self._labels(render_task(request, "check the ground at the NO2 peak")):
+            with self.subTest(label=label):
+                self.assertIn(label, GROUND_SYSTEM_PROMPT)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -77,8 +77,53 @@ class SubAgentEnvelope(BaseModel):
     suggested_followups: list[str] | None = Field(default=None, max_length=2)
 
 
+DispatchStatus = Literal["ok", "error", "duplicate", "rejected"]
+
+
+class DispatchItemResult(BaseModel):
+    """T64: what became of one request in a dispatch call. ``index`` is its
+    position in the request list; ``result`` is absent only when the item was
+    rejected and never ran."""
+
+    index: int
+    agent: Literal["ground", "satellite"]
+    intent: str
+    status: DispatchStatus
+    reason: str | None = None
+    result: AgentResult | None = None
+
+
+class DispatchResult(BaseModel):
+    """T64: the dispatch tool's return value, one item per request, always in
+    request order regardless of which sub-agent finished first."""
+
+    results: list[DispatchItemResult]
+
+
 def agent_result_to_json(result: AgentResult) -> str:
     return result.model_dump_json(exclude_none=True)
+
+
+def parse_dispatch_result(raw: Any) -> DispatchResult | None:
+    if isinstance(raw, DispatchResult):
+        return raw
+    if not isinstance(raw, str):
+        return None
+    try:
+        return DispatchResult.model_validate_json(raw)
+    except Exception:
+        return None
+
+
+def parse_tool_results(raw: Any) -> list[AgentResult]:
+    """Every AgentResult a supervisor ToolMessage carries, in order: the items
+    of a dispatch batch that ran, or the single result a pre-T64 checkpoint
+    (ask_* tools, fast-path write-back) holds. Empty for anything else."""
+    batch = parse_dispatch_result(raw)
+    if batch is not None:
+        return [item.result for item in batch.results if item.result is not None]
+    single = parse_agent_result(raw)
+    return [single] if single is not None else []
 
 
 # The few scalar fields a checkpointed chart reference keeps: enough for the

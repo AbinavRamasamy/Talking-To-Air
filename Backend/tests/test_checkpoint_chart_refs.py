@@ -95,9 +95,8 @@ def _tool_message_contents(messages):
 @unittest.skipIf(importlib.util.find_spec("langchain") is None, "langchain is not installed")
 class FastPathCheckpointTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        from tta_backend.services import subagent_dispatch
-
-        subagent_dispatch.get_call_budget().clear()
+        from tta_backend.utils.streaming import get_call_budget
+        get_call_budget().clear()
 
     async def _run_fast_path_turn(self, supervisor, result):
         from tta_backend.services.chart_service import ChartService
@@ -223,7 +222,7 @@ class ReferenceReadTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ToolThenAnswerModel:
-    """Calls ask_earthdata_agent once, then answers."""
+    """Dispatches one satellite request, then answers."""
 
     def __init__(self):
         self.calls = 0
@@ -236,9 +235,10 @@ class ToolThenAnswerModel:
 
         self.calls += 1
         if self.calls == 1:
-            return AIMessage(content="", tool_calls=[
-                {"name": "ask_earthdata_agent", "args": {"task": "plot it"}, "id": "call-1"},
-            ])
+            return AIMessage(content="", tool_calls=[{"name": "dispatch", "id": "call-1", "args": {"requests": [
+                {"agent": "satellite", "intent": "visualize", "figure_type": "map", "variable": "NO2",
+                 "location": "New Jersey"},
+            ]}}])
         return AIMessage(content="Here is the map.")
 
 
@@ -278,10 +278,10 @@ class SupervisorPathCheckpointTests(unittest.IsolatedAsyncioTestCase):
         state = await supervisor.aget_state({"configurable": {"thread_id": "thread-1"}})
         contents = _tool_message_contents(state.values["messages"])
         self.assertEqual(len(contents), 1)
-        envelope = json.loads(contents[0])
-        self.assertEqual(len(envelope["charts"]), 1)
+        (item,) = json.loads(contents[0])["results"]
+        self.assertEqual(len(item["result"]["charts"]), 1)
         for key in GRID_KEYS:
-            self.assertNotIn(key, envelope["charts"][0])
+            self.assertNotIn(key, item["result"]["charts"][0])
 
     async def test_supervisor_turn_still_streams_the_full_chart(self):
         from langgraph.checkpoint.memory import InMemorySaver
