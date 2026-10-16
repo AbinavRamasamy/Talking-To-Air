@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -18,7 +18,14 @@ from tta_backend.config.error_templates import (
 from tta_backend.config.settings import get_settings
 from tta_backend.config.workflow_stages import STAGE_WORKING
 from tta_backend.earthdata_mcp.results import CATEGORY_CONTRACT
-from tta_backend.models import AgentResult, parse_agent_result, parse_chart_payload, parse_tool_results
+from tta_backend.models import (
+    AgentResult,
+    DispatchItemResult,
+    DispatchResult,
+    parse_agent_result,
+    parse_chart_payload,
+    parse_tool_results,
+)
 from tta_backend.services import admission, cube_cache
 from tta_backend.services.artifact_store import artifact_store
 from tta_backend.services.chart_service import ChartService
@@ -27,23 +34,22 @@ from tta_backend.services.retrieval_composites import TERMINAL_STATUSES
 from tta_backend.services.subagent_dispatch import run_ground, run_satellite
 from tta_backend.utils import streaming
 from tta_backend.utils.message_utils import flatten_text_content
+from tta_backend.services.consulted_header import consulted_agents, consulted_header, with_consulted_header
 from tta_backend.utils.streaming import stream_response, user_id_context, user_message_context
 
 logger = logging.getLogger(__name__)
 
-_AGENT_CONSULTED_HEADERS = {
-    "GROUND": "Agent consulted: GROUND",
-    "SATELLITE": "Agent consulted: SATELLITE",
+# The router intents the fast path answers by itself, and the agent each one runs.
+_FAST_PATH_AGENTS: dict[str, Literal["ground", "satellite"]] = {
+    "GROUND": "ground",
+    "SATELLITE": "satellite",
 }
 
-# T14/history-fix: the tool name a fast-pathed turn is written back under.
-# These are the supervisor's pre-T64 tools: the write-back keeps their
-# single-AgentResult shape, which history (parse_tool_results) and every
-# vetted supervisor model still read (T64 Phase 0 F6).
-_INTENT_TOOL_NAMES = {
-    "GROUND": "ask_ground_sensor_agent",
-    "SATELLITE": "ask_earthdata_agent",
-}
+# T64 D15: the intent a fast-pathed turn is written back under. The regex
+# router picks an agent but never classifies intent, so the write-back's
+# dispatch call says so rather than inventing one. History only: it is never
+# validated against the request schema.
+_FAST_PATH_INTENT = "fast_path"
 
 
 # The envelope's own cap on follow-ups (AgentResult.suggested_followups).
@@ -85,6 +91,11 @@ class _LiveTurn:
     #: (Frontend/src/hooks/useChat.js), so this set is the single point that
     #: keeps each chart_id rendered exactly once.
     emitted_chart_ids: set[str] = field(default_factory=set)
+    #: T64 D14: agents the turn's dispatch calls actually ran, which the
+    #: answer's "Agent consulted" header names.
+    consulted: list[str] = field(default_factory=list)
+    #: Set by each dispatch result: the next answer text opens with the header.
+    header_due: bool = False
 
 
 class ChatStreamService:
@@ -211,7 +222,7 @@ class ChatStreamService:
         # date-and-context-enriched task rather than what the researcher sent.
         with user_id_context(user_id), user_message_context(message), cube_cache.active_turn():
             intent = route_intent(message)
-            route = "fast_path" if intent in _AGENT_CONSULTED_HEADERS else "supervisor"
+            route = "fast_path" if intent in _FAST_PATH_AGENTS else "supervisor"
             logger.info(
                 "chat_route_decision",
                 extra={"_request_id": request_id, "_thread_id": thread_id, "_intent": intent, "_route": route},
@@ -252,6 +263,9 @@ class ChatStreamService:
                             for event in live:
                                 yield event
                         elif event_type == "tool_result":
+                            ran = consulted_agents(data.get("content", ""))
+                            turn.consulted += [a for a in ran if a not in turn.consulted]
+                            turn.header_due = turn.header_due or bool(ran)
                             async for event in self._tool_result_events(
                                 data.get("content", ""),
                                 thread_id,
@@ -267,6 +281,12 @@ class ChatStreamService:
                                 data, thread_id, user_id, turn.emitted_chart_ids, suggestions_box,
                                 variable_choice_box,
                             )
+                            if text and turn.header_due:
+                                # D14: the header streams ahead of the answer it opens.
+                                opening = f"{consulted_header(turn.consulted)}\n\n"
+                                response_text += opening
+                                turn.header_due = False
+                                yield self.sse("text", {"content": opening})
                             response_text += text
                             if text:
                                 yield self.sse("text", {"content": text})
@@ -275,7 +295,7 @@ class ChatStreamService:
 
                     done_payload: dict[str, Any] = {
                         "thread_id": thread_id,
-                        "response": self._strip_supervisor_preamble(response_text),
+                        "response": with_consulted_header(response_text, turn.consulted),
                         "artifacts": artifacts,
                         "tool_calls": turn.tool_calls,
                     }
@@ -407,14 +427,14 @@ class ChatStreamService:
                 artifacts.append(payload)
             yield self.sse("artifact", payload)
 
-        final_text = f"{_AGENT_CONSULTED_HEADERS[intent]}\n\n{result.text}"
+        final_text = with_consulted_header(result.text, [_FAST_PATH_AGENTS[intent]])
         yield self.sse("text", {"content": final_text})
 
         await self._write_back_turn(supervisor_agent, thread_id, user_id, message, final_text, intent, result)
 
         done_payload = {
             "thread_id": thread_id,
-            "response": self._strip_supervisor_preamble(final_text),
+            "response": final_text,
             "artifacts": artifacts,
             "tool_calls": turn.tool_calls,
         }
@@ -448,10 +468,10 @@ class ChatStreamService:
         logged loudly, never silent.
 
         When the result carries a chart or artifact, writes the same
-        tool_call/ToolMessage/AIMessage shape the supervisor's pre-T64
-        ask_* tools produced, carrying the AgentResult JSON in the
-        ToolMessage with each chart reduced to a reference to its
-        agent_charts row (ChartService.checkpoint_envelope). HistoryService only ever reconstructs a turn's chart/
+        tool_call/ToolMessage/AIMessage shape the supervisor's own dispatch
+        tool produces (T64 D15): a one-item DispatchResult in the
+        ToolMessage, each chart reduced to a reference to its agent_charts
+        row (ChartService.checkpoint_dispatch_envelope). HistoryService only ever reconstructs a turn's chart/
         artifact cards from a role=="tool" message (see _attach_tool_output)
         — a bare Human/AI pair here left fast-pathed charts undiscoverable
         after a reload, even though they were already durably persisted in
@@ -473,17 +493,24 @@ class ChatStreamService:
         just its chart card."""
         if result.charts or result.artifacts:
             tool_call_id = str(uuid.uuid4())
-            tool_name = _INTENT_TOOL_NAMES[intent]
+            agent_name = _FAST_PATH_AGENTS[intent]
+            batch = DispatchResult(results=[DispatchItemResult(
+                index=0, agent=agent_name, intent=_FAST_PATH_INTENT, status="ok", result=result,
+            )])
             messages = [
                 HumanMessage(content=user_message),
                 AIMessage(
                     content="",
-                    tool_calls=[{"name": tool_name, "args": {"task": user_message}, "id": tool_call_id}],
+                    tool_calls=[{
+                        "name": "dispatch",
+                        "args": {"requests": [{"agent": agent_name, "intent": _FAST_PATH_INTENT}]},
+                        "id": tool_call_id,
+                    }],
                 ),
                 ToolMessage(
-                    content=await self.chart_service.checkpoint_envelope(result, thread_id, user_id),
+                    content=await self.chart_service.checkpoint_dispatch_envelope(batch, thread_id, user_id),
                     tool_call_id=tool_call_id,
-                    name=tool_name,
+                    name="dispatch",
                 ),
                 AIMessage(content=final_answer),
             ]
@@ -576,11 +603,6 @@ class ChatStreamService:
                 "tool_calls": [],
             }),
         ]
-
-    def _strip_supervisor_preamble(self, text: str) -> str:
-        marker = "Agent consulted:"
-        idx = text.find(marker)
-        return text[idx:] if idx > 0 else text
 
     async def _tool_result_events(
         self,

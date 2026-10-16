@@ -122,10 +122,25 @@ class FastPathCheckpointTests(unittest.IsolatedAsyncioTestCase):
 
         contents = _tool_message_contents(supervisor.state_messages)
         self.assertEqual(len(contents), 1)
-        envelope = json.loads(contents[0])
-        self.assertEqual(len(envelope["charts"]), 1)
+        (item,) = json.loads(contents[0])["results"]
+        self.assertEqual((item["agent"], item["status"]), ("satellite", "ok"))
+        self.assertEqual(len(item["result"]["charts"]), 1)
         for key in GRID_KEYS:
-            self.assertNotIn(key, envelope["charts"][0])
+            self.assertNotIn(key, item["result"]["charts"][0])
+
+    async def test_fast_path_write_back_records_the_turn_as_a_dispatch_call(self):
+        """T64 D15: history the supervisor reads names only the tool it has."""
+        from tta_backend.models import AgentResult, ChartPayload
+
+        supervisor = RecordingSupervisor()
+        with FakeChartStore().installed():
+            await self._run_fast_path_turn(
+                supervisor, AgentResult(text="Plotted.", charts=[ChartPayload.model_validate(_grid_chart_payload())]),
+            )
+
+        calls = [tc for m in supervisor.state_messages for tc in (getattr(m, "tool_calls", None) or [])]
+        self.assertEqual([c["name"] for c in calls], ["dispatch"])
+        self.assertEqual(calls[0]["args"], {"requests": [{"agent": "satellite", "intent": "fast_path"}]})
 
     async def test_a_reload_restores_the_full_chart_from_agent_charts(self):
         from tta_backend.models import AgentResult, ChartPayload
@@ -141,6 +156,7 @@ class FastPathCheckpointTests(unittest.IsolatedAsyncioTestCase):
         assistant = next(m for m in history if m["role"] == "assistant" and m["charts"])
         self.assertEqual(len(assistant["charts"]), 1)
         self.assertEqual(assistant["charts"][0]["values"], [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        self.assertEqual(assistant["content"], "Agent consulted: SATELLITE\n\nPlotted.")
 
 
 @unittest.skipIf(importlib.util.find_spec("langchain") is None, "langchain is not installed")
