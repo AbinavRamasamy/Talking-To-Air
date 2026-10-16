@@ -176,5 +176,69 @@ class DispatchExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.results[0].result.text, "answer for NJ")
 
 
+class DispatchLoggingTests(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-10-16: a second-round ground request made no AQS call, and
+    nothing in the logs said whether it ran, was deduped or was rejected."""
+
+    LOGGER = "tta_backend.services.dispatch_executor"
+
+    async def asyncSetUp(self):
+        from tta_backend.utils.streaming import _call_budget
+
+        self._token = _call_budget.set({})
+
+    async def asyncTearDown(self):
+        from tta_backend.utils.streaming import _call_budget
+
+        _call_budget.reset(self._token)
+
+    @staticmethod
+    def _events(captured, event):
+        return [r for r in captured.records if getattr(r, "_event", None) == event]
+
+    async def test_each_dispatch_call_logs_its_items_outcomes_and_the_turns_budget(self):
+        from tta_backend.services.dispatch_executor import execute_dispatch
+
+        runner = FakeRunner(fail={"NY"})
+        with self.assertLogs(self.LOGGER, level="INFO") as captured:
+            await execute_dispatch([_sat("NJ"), _sat("NY"), _sat("NJ")], runner)
+            await execute_dispatch([_ground("Newark"), _sat("NJ")], runner)
+
+        first, second = self._events(captured, "dispatch_batch")
+        self.assertEqual(first._statuses, ["ok", "error", "duplicate"])
+        self.assertEqual(first._agents, ["satellite", "satellite", "satellite"])
+        self.assertEqual((first._round, first._runs_used, first._max_runs), (1, 2, 6))
+        self.assertEqual(second._statuses, ["ok", "duplicate"])
+        self.assertEqual((second._round, second._runs_used, second._max_rounds), (2, 3, 2))
+
+    async def test_each_run_logs_its_wait_for_a_slot_and_its_own_duration(self):
+        from tta_backend.services.dispatch_executor import execute_dispatch
+
+        runner = FakeRunner(delays={f"r{i}": 0.05 for i in range(3)})
+        with self.assertLogs(self.LOGGER, level="INFO") as captured:
+            await execute_dispatch([_sat("r0"), _sat("r1"), _sat("r2")], runner)
+
+        items = self._events(captured, "dispatch_item")
+        self.assertEqual(len(items), 3)
+        self.assertTrue(all(i._agent == "satellite" and i._status == "ok" for i in items))
+        self.assertTrue(all(i._run_seconds >= 0.04 for i in items))
+        # Two satellite slots: the third run waited for one to free up.
+        self.assertGreaterEqual(max(i._wait_seconds for i in items), 0.04)
+
+    async def test_a_rejected_dispatch_is_logged_as_a_warning_with_its_reason(self):
+        from tta_backend.services.dispatch_executor import execute_dispatch
+
+        runner = FakeRunner()
+        await execute_dispatch([_sat("a")], runner)
+        await execute_dispatch([_sat("b")], runner)
+        with self.assertLogs(self.LOGGER, level="WARNING") as captured:
+            await execute_dispatch([_sat("c")], runner)
+
+        (batch,) = self._events(captured, "dispatch_batch")
+        self.assertEqual(batch.levelname, "WARNING")
+        self.assertEqual(batch._statuses, ["rejected"])
+        self.assertIn("round limit", batch._reason)
+
+
 if __name__ == "__main__":
     unittest.main()

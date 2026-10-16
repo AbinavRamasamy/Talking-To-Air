@@ -104,14 +104,14 @@ def canonical_key(request: AgentRequest) -> str:
 
 
 def render_task(request: AgentRequest, user_message: str | None) -> str:
-    """The task string a sub-agent receives: the researcher's own message
-    (bound server-side, never written by the model) followed by the typed
-    fields as labeled lines. A pure template, so the same request always
-    renders to the same text."""
-    lines = []
-    if user_message:
-        lines.append(f"Researcher's request (verbatim): {user_message}")
-    lines.append(f"Intent: {request.intent}")
+    """The task string a sub-agent receives: the typed fields as labeled
+    lines, which are its task, then the researcher's own message (bound
+    server-side, never written by the model) as context. The message comes
+    last and is labeled context because one question often spans several
+    requests: given it as the authority, a ground run also did the
+    satellite half of the question. A pure template, so the same request
+    always renders to the same text."""
+    lines = [f"Intent: {request.intent}"]
     if isinstance(request, SatelliteRequest):
         lines.append(f"Figure: {request.figure_type}")
         lines.append(f"Variable: {request.variable}")
@@ -125,6 +125,8 @@ def render_task(request: AgentRequest, user_message: str | None) -> str:
         lines.append(dates)
     if request.prior_findings:
         lines.append(f"Prior findings: {request.prior_findings}")
+    if user_message:
+        lines.append(f"Researcher's full message (context only): {user_message}")
     return "\n".join(lines)
 
 

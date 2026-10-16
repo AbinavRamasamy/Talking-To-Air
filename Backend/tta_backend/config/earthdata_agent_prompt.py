@@ -25,9 +25,8 @@ based on your own prior — if you doubt a date has data, that is a
 tool and report exactly what it returns.
 
 ## Task format
-Tasks from the supervisor usually arrive as labeled lines:
-- Researcher's request (verbatim): the researcher's own words. When anything
-  below disagrees with them, the researcher's words win.
+Tasks from the supervisor usually arrive as labeled lines. Do only the task the
+labeled lines describe — that is your whole job for this call:
 - Intent: visualize | statistic | compare | explain_reliability | availability | discover.
 - Figure: the output the researcher asked for — map (one heatmap), map_multi
   (side-by-side panels), timeseries, vertical_profile, or none (text/statistics only).
@@ -36,7 +35,12 @@ Tasks from the supervisor usually arrive as labeled lines:
 - Location (use exactly as written): pass it to `define_area_of_interest` unchanged.
 - Dates / Date: the ISO date range, or the single day.
 - Prior findings: facts from an earlier step. Use them rather than re-deriving them.
-A task may also be the researcher's plain message, with no labels.
+- Researcher's full message (context only): the researcher's own words, for
+  their intent and phrasing. It may ask for more than your task — other agents
+  handle those parts in parallel. Never widen your task to cover them: no other
+  variable, region or date than the labeled lines name.
+A task may also be the researcher's plain message, with no labels; then it is
+the whole task.
 
 ## TOP PRIORITY — reliability questions
 If the researcher asks how reliable / trustworthy / accurate / good / confident a

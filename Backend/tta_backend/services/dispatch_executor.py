@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
@@ -16,7 +17,9 @@ from typing import Literal
 from tta_backend.config.settings import get_settings
 from tta_backend.models import AgentRequest, AgentResult, DispatchItemResult, DispatchResult, canonical_key
 from tta_backend.services.subagent_dispatch import render_unexpected_exception
-from tta_backend.utils.streaming import get_call_budget
+from tta_backend.utils.streaming import current_thread_id, get_call_budget
+
+logger = logging.getLogger(__name__)
 
 RunOne = Callable[[AgentRequest], Awaitable[AgentResult]]
 _Outcome = tuple[Literal["ok", "error"], AgentResult]
@@ -89,11 +92,13 @@ async def execute_dispatch(requests: list[AgentRequest], run_one: RunOne) -> Dis
     if new:
         refusal = state.refusal(len(new))
         if refusal is not None:
-            return DispatchResult(results=[
+            rejected = DispatchResult(results=[
                 DispatchItemResult(index=index, agent=request.agent, intent=request.intent, status="rejected",
                                    reason=refusal)
                 for index, request in enumerate(requests)
             ])
+            _log_batch(state, rejected, reason=refusal)
+            return rejected
         state.rounds_used += 1
         state.runs_used += len(new)
         for key, request in new.items():
@@ -101,13 +106,38 @@ async def execute_dispatch(requests: list[AgentRequest], run_one: RunOne) -> Dis
 
     outcomes = await asyncio.gather(*(state.runs[key] for key in keys))
     owners = {key: keys.index(key) for key in new}
-    return DispatchResult(results=[
+    batch = DispatchResult(results=[
         DispatchItemResult(
             index=index, agent=request.agent, intent=request.intent,
             status=status if owners.get(key) == index else "duplicate", result=result,
         )
         for index, (key, request, (status, result)) in enumerate(zip(keys, requests, outcomes, strict=True))
     ])
+    _log_batch(state, batch)
+    return batch
+
+
+def _log_batch(state: _TurnState, batch: DispatchResult, *, reason: str | None = None) -> None:
+    """One line per dispatch call: what became of each item, in request
+    order, and how much of the turn's budget is spent -- the record of what
+    the supervisor actually ran, which no other log line gives."""
+    logger.log(
+        logging.WARNING if reason is not None else logging.INFO,
+        "dispatch_batch",
+        extra={
+            "_event": "dispatch_batch",
+            "_thread_id": current_thread_id(),
+            "_round": state.rounds_used,
+            "_agents": [item.agent for item in batch.results],
+            "_intents": [item.intent for item in batch.results],
+            "_statuses": [item.status for item in batch.results],
+            "_reason": reason,
+            "_runs_used": state.runs_used,
+            "_max_runs": state.max_runs,
+            "_rounds_used": state.rounds_used,
+            "_max_rounds": state.max_rounds,
+        },
+    )
 
 
 async def _run_capped(state: _TurnState, request: AgentRequest, run_one: RunOne) -> _Outcome:
@@ -116,8 +146,25 @@ async def _run_capped(state: _TurnState, request: AgentRequest, run_one: RunOne)
     # The agent's own cap is taken before the shared one, so a satellite run
     # queued behind the satellite cap never holds a slot a ground run could use.
     agent_cap = state.satellite if request.agent == "satellite" else contextlib.nullcontext()
+    loop = asyncio.get_running_loop()
+    queued = loop.time()
     async with agent_cap, state.total:
+        started = loop.time()
+        outcome: _Outcome
         try:
-            return "ok", await run_one(request)
+            outcome = "ok", await run_one(request)
         except Exception as exc:
-            return "error", AgentResult(text=render_unexpected_exception(exc, f"{request.agent} agent"))
+            outcome = "error", AgentResult(text=render_unexpected_exception(exc, f"{request.agent} agent"))
+        logger.info(
+            "dispatch_item",
+            extra={
+                "_event": "dispatch_item",
+                "_thread_id": current_thread_id(),
+                "_agent": request.agent,
+                "_intent": str(request.intent),
+                "_status": outcome[0],
+                "_wait_seconds": round(started - queued, 3),
+                "_run_seconds": round(loop.time() - started, 3),
+            },
+        )
+        return outcome

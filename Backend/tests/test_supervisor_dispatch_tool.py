@@ -96,7 +96,7 @@ class SupervisorDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(batch.results[0].result.text, "Mapped ozone over the OTC.")
         (satellite_task,), (ground_task,) = satellite.tasks, ground.tasks
         for task in (satellite_task, ground_task):
-            self.assertIn(f"Researcher's request (verbatim): {message}", task)
+            self.assertTrue(task.endswith(f"Researcher's full message (context only): {message}"))
         self.assertIn("Location (use exactly as written): the OTC", satellite_task)
         self.assertIn("Pollutant: NO2", ground_task)
 

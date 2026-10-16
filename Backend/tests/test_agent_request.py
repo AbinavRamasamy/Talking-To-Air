@@ -139,9 +139,14 @@ class CanonicalKeyTests(unittest.TestCase):
 class RenderTaskTests(unittest.TestCase):
     """The task string a sub-agent receives (D7): a fixed template over the
     typed fields plus the researcher's own words (D6) -- no model rewrites
-    anything on the way."""
+    anything on the way.
 
-    def test_a_satellite_request_renders_as_labeled_lines_under_the_researchers_words(self):
+    The fields come first and are the task; the researcher's message follows
+    as context. Live (2026-10-16), with the message first and labeled as the
+    authority, a ground run asked for O3 in New Jersey also queried NO2 across
+    the whole OTC -- the satellite half of the same question."""
+
+    def test_a_satellite_request_renders_its_fields_then_the_researchers_message_as_context(self):
         from tta_backend.models.agent_request import render_task
 
         (request,) = _requests({
@@ -152,14 +157,14 @@ class RenderTaskTests(unittest.TestCase):
 
         self.assertEqual(
             render_task(request, "Plot TEMPO ozone over the OTC for 2024-07-15"),
-            "Researcher's request (verbatim): Plot TEMPO ozone over the OTC for 2024-07-15\n"
             "Intent: visualize\n"
             "Figure: map\n"
             "Variable: ozone\n"
             "Dataset: TEMPO\n"
             "Location (use exactly as written): the OTC\n"
             "Dates: 2024-07-15 to 2024-07-15\n"
-            "Prior findings: ground monitors exceeded 70 ppb at 3 sites",
+            "Prior findings: ground monitors exceeded 70 ppb at 3 sites\n"
+            "Researcher's full message (context only): Plot TEMPO ozone over the OTC for 2024-07-15",
         )
 
     def test_a_ground_request_renders_only_the_fields_it_has(self):
@@ -183,10 +188,10 @@ class RenderTaskTests(unittest.TestCase):
         self.assertTrue(render_task(open_ended, None).endswith("\nDates: up to 2024-07-31"))
         self.assertEqual(
             render_task(undated, "closest NO2 monitor to Tampa FL?"),
-            "Researcher's request (verbatim): closest NO2 monitor to Tampa FL?\n"
             "Intent: nearest_monitor\n"
             "Pollutant: NO2\n"
-            "Location (use exactly as written): Tampa FL",
+            "Location (use exactly as written): Tampa FL\n"
+            "Researcher's full message (context only): closest NO2 monitor to Tampa FL?",
         )
 
 
@@ -226,6 +231,20 @@ class RenderedTaskPromptContractTests(unittest.TestCase):
         for label in self._labels(render_task(request, "check the ground at the NO2 peak")):
             with self.subTest(label=label):
                 self.assertIn(label, GROUND_SYSTEM_PROMPT)
+
+    def test_both_prompts_make_the_labeled_fields_the_task_and_the_message_context(self):
+        """A multi-part question always asks more than one request carries;
+        a prompt that lets the message win hands each sub-agent the whole
+        question."""
+        from tta_backend.config.earthdata_agent_prompt import get_earthdata_agent_prompt
+        from tta_backend.config.ground_sensor_agent_prompt import GROUND_SYSTEM_PROMPT
+
+        for name, prompt in (("earthdata", get_earthdata_agent_prompt()), ("ground", GROUND_SYSTEM_PROMPT)):
+            text = " ".join(prompt.lower().split())
+            with self.subTest(prompt=name):
+                self.assertIn("do only the task the labeled lines describe", text)
+                self.assertIn("other agents", text)
+                self.assertNotIn("the researcher's words win", text)
 
 
 if __name__ == "__main__":
