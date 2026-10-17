@@ -62,7 +62,9 @@ def record_phase(phase: str, duration_seconds: float, /, **context: Any) -> None
 class _PhaseTimer:
     """Times one phase. Usable as either a sync or an async context manager --
     the pipeline crosses ``asyncio.to_thread`` boundaries, and a monotonic
-    wall clock is the right measurement on both sides of one.
+    wall clock is the right measurement on both sides of one. That clock is
+    ``perf_counter``: ``time.monotonic`` on Windows before Python 3.13 ticks
+    only every 15.6 ms, which rounds short phases to zero or a whole tick.
 
     Yields its mutable context dict, so a call site can record sizes it only
     learns *inside* the block::
@@ -78,13 +80,13 @@ class _PhaseTimer:
         self._started: float | None = None
 
     def _start(self) -> dict[str, Any]:
-        self._started = time.monotonic()
+        self._started = time.perf_counter()
         return self.context
 
     def _finish(self) -> None:
         if self._started is None:  # pragma: no cover -- defensive
             return
-        record_phase(self.phase, time.monotonic() - self._started, **self.context)
+        record_phase(self.phase, time.perf_counter() - self._started, **self.context)
 
     def __enter__(self) -> dict[str, Any]:
         return self._start()
