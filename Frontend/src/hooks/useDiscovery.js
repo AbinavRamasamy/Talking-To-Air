@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { normalizeSearchResults } from '../utils/discoveryResults'
+import { cmrTemporal } from '../utils/dateWindow.js'
 import { apiFetch } from '../utils/apiFetch.js'
 import { API_BASE } from '../config.js'
 
@@ -32,16 +33,19 @@ export function useDiscovery() {
     return `HTTP ${res.status}`
   }
 
-  const search = useCallback(async () => {
+  // `windowValue` lets a date change re-run the search with the window it
+  // just picked, before that state update has reached this closure.
+  const search = useCallback(async (windowValue) => {
     const trimmed = query.trim()
     if (!trimmed) return
+    const temporal = cmrTemporal(typeof windowValue === 'string' ? windowValue : timeRange)
     setLoading(true)
     setError(null)
     try {
       const res = await apiFetch(`${API_BASE}/discovery/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmed }),
+        body: JSON.stringify({ query: trimmed, filters: temporal ? { temporal } : undefined }),
       })
       if (!res.ok) throw new Error(await readErrorMessage(res))
       const data = await res.json()
@@ -54,7 +58,7 @@ export function useDiscovery() {
     } finally {
       setLoading(false)
     }
-  }, [query])
+  }, [query, timeRange])
 
   const preview = useCallback(async (datasetHandle, layer) => {
     setPreviews(prev => ({ ...prev, [datasetHandle]: { loading: true, error: null } }))

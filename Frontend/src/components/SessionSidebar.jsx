@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ConnectorsPanel from './ConnectorsPanel'
+import AccountMenu from './AccountMenu.jsx'
 import { apiFetch } from '../utils/apiFetch.js'
 import { API_BASE } from '../config.js'
 
@@ -104,7 +105,7 @@ function TurnStatusDot({ status }) {
   )
 }
 
-export default function SessionSidebar({ sessions, hasMoreSessions = false, onLoadMoreSessions, threadId, turnStatus = {}, onSwitch, onNew, onDelete, onLogout, artifacts = [], onCollapse }) {
+export default function SessionSidebar({ sessions, hasMoreSessions = false, onLoadMoreSessions, threadId, turnStatus = {}, onSwitch, onNew, onDelete, onLogout, user, artifacts = [], onCollapse }) {
   const [nav, setNav] = useState('chats')
 
   const getSessionId = (session) => typeof session === 'string' ? session : session?.id
@@ -320,32 +321,7 @@ export default function SessionSidebar({ sessions, hasMoreSessions = false, onLo
         </>
       )}
 
-      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '14px', marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <div style={{
-          width: '32px', height: '32px', borderRadius: '50%', background: 'var(--teal)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700,
-          fontSize: '12px', flexShrink: 0, color: 'white',
-        }}>
-          T
-        </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: '12.5px', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
-            Talking to Air
-          </div>
-        </div>
-        <button
-          onClick={onLogout}
-          title="Sign out"
-          aria-label="Sign out"
-          style={{ background: 'transparent', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', flexShrink: 0 }}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ color: 'var(--text-muted)' }}>
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <path d="M16 17l5-5-5-5" />
-            <path d="M21 12H9" />
-          </svg>
-        </button>
-      </div>
+      <AccountMenu user={user} onLogout={onLogout} onManageConnectors={() => setNav('connectors')} />
 
       <style>{`
         .session-row:hover .session-delete-btn,
