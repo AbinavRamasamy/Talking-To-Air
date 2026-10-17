@@ -91,6 +91,9 @@ class DispatchItemResult(BaseModel):
     status: DispatchStatus
     reason: str | None = None
     result: AgentResult | None = None
+    # The datasets (or EPA AQS) the run drew on, recorded when it ran: the
+    # checkpointed copy of ``result`` keeps only chart references.
+    sources: list[str] = Field(default_factory=list)
 
 
 class DispatchResult(BaseModel):

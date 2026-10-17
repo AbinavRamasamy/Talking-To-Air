@@ -156,7 +156,7 @@ class FastPathCheckpointTests(unittest.IsolatedAsyncioTestCase):
         assistant = next(m for m in history if m["role"] == "assistant" and m["charts"])
         self.assertEqual(len(assistant["charts"]), 1)
         self.assertEqual(assistant["charts"][0]["values"], [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
-        self.assertEqual(assistant["content"], "Agent consulted: SATELLITE\n\nPlotted.")
+        self.assertEqual(assistant["content"], "Data sources: NASA Earthdata\n\nPlotted.")
 
 
 @unittest.skipIf(importlib.util.find_spec("langchain") is None, "langchain is not installed")

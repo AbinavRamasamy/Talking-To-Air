@@ -80,15 +80,15 @@ class SupervisorPromptDispatchTests(unittest.TestCase):
         self.assertNotIn("exactly once", prompt)
         self.assertNotIn("already retrieved", prompt)
 
-    def test_prompt_leaves_the_agent_consulted_header_to_the_server(self):
+    def test_prompt_leaves_the_data_sources_header_to_the_server(self):
         """D14: the header is computed from what ran; a model told to write
-        one can claim a check that never happened."""
+        one can claim a dataset or check that never happened."""
         from tta_backend.config.supervisor_prompt import SUPERVISOR_PROMPT
 
         prompt = " ".join(SUPERVISOR_PROMPT.lower().split())
 
         self.assertNotIn("must start with", prompt)
-        self.assertIn("do not write an \"agent consulted\" line", prompt)
+        self.assertIn("do not write a \"data sources\" line", prompt)
 
     def test_a_plot_of_an_air_quality_pollutant_is_a_satellite_request_alone(self):
         """Phase 0 F5: asked to plot ozone over the OTC, a lite model added an

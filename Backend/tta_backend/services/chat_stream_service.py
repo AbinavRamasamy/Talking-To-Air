@@ -35,7 +35,13 @@ from tta_backend.services.retrieval_composites import TERMINAL_STATUSES
 from tta_backend.services.subagent_dispatch import run_ground, run_satellite
 from tta_backend.utils import streaming
 from tta_backend.utils.message_utils import flatten_text_content
-from tta_backend.services.consulted_header import consulted_agents, consulted_header, with_consulted_header
+from tta_backend.services.consulted_header import (
+    consulted_sources,
+    merge_sources,
+    result_sources,
+    sources_header,
+    with_sources_header,
+)
 from tta_backend.utils.streaming import stream_response, user_id_context, user_message_context
 
 logger = logging.getLogger(__name__)
@@ -92,8 +98,8 @@ class _LiveTurn:
     #: (Frontend/src/hooks/useChat.js), so this set is the single point that
     #: keeps each chart_id rendered exactly once.
     emitted_chart_ids: set[str] = field(default_factory=set)
-    #: T64 D14: agents the turn's dispatch calls actually ran, which the
-    #: answer's "Agent consulted" header names.
+    #: T64 D14: the sources the turn's dispatch calls actually drew on, which
+    #: the answer's "Data sources" header names.
     consulted: list[str] = field(default_factory=list)
     #: Set by each dispatch result: the next answer text opens with the header.
     header_due: bool = False
@@ -268,8 +274,8 @@ class ChatStreamService:
                             # DispatchResult instance straight through.
                             content = data.get("content", "")
                             batch = parse_dispatch_result(content)
-                            ran = consulted_agents(batch)
-                            turn.consulted += [a for a in ran if a not in turn.consulted]
+                            ran = consulted_sources(batch)
+                            turn.consulted = merge_sources(turn.consulted, ran)
                             turn.header_due = turn.header_due or bool(ran)
                             async for event in self._tool_result_events(
                                 batch if batch is not None else content,
@@ -288,7 +294,7 @@ class ChatStreamService:
                             )
                             if text and turn.header_due:
                                 # D14: the header streams ahead of the answer it opens.
-                                opening = f"{consulted_header(turn.consulted)}\n\n"
+                                opening = f"{sources_header(turn.consulted)}\n\n"
                                 response_text += opening
                                 turn.header_due = False
                                 yield self.sse("text", {"content": opening})
@@ -300,7 +306,7 @@ class ChatStreamService:
 
                     done_payload: dict[str, Any] = {
                         "thread_id": thread_id,
-                        "response": with_consulted_header(response_text, turn.consulted),
+                        "response": with_sources_header(response_text, turn.consulted),
                         "artifacts": artifacts,
                         "tool_calls": turn.tool_calls,
                     }
@@ -329,7 +335,7 @@ class ChatStreamService:
         """Dispatch directly to the ground or satellite sub-agent, bypassing
         the supervisor's two model calls (T14). Forwards tool_call/status/
         job_progress/chart events live as the sub-agent works, then emits the
-        finalized answer under the same "Agent consulted: ..." header the
+        finalized answer under the same "Data sources: ..." header the
         supervisor path produces, and writes the turn back into the
         supervisor's checkpointed thread so follow-ups keep their
         antecedents."""
@@ -432,7 +438,7 @@ class ChatStreamService:
                 artifacts.append(payload)
             yield self.sse("artifact", payload)
 
-        final_text = with_consulted_header(result.text, [_FAST_PATH_AGENTS[intent]])
+        final_text = with_sources_header(result.text, result_sources(_FAST_PATH_AGENTS[intent], result))
         yield self.sse("text", {"content": final_text})
 
         await self._write_back_turn(supervisor_agent, thread_id, user_id, message, final_text, intent, result)
@@ -501,6 +507,7 @@ class ChatStreamService:
             agent_name = _FAST_PATH_AGENTS[intent]
             batch = DispatchResult(results=[DispatchItemResult(
                 index=0, agent=agent_name, intent=_FAST_PATH_INTENT, status="ok", result=result,
+                sources=result_sources(agent_name, result),
             )])
             messages = [
                 HumanMessage(content=user_message),
