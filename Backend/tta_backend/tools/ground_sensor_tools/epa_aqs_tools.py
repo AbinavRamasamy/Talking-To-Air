@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 
 from langchain.tools import tool
 import httpx
@@ -12,7 +13,9 @@ from datetime import date, timedelta
 
 from tta_backend.config.settings import get_settings
 from tta_backend.services.artifact_store import artifact_store
+from tta_backend.services.connector_credential_service import get_aqs_credential_injector
 from tta_backend.utils.plotting import get_geocoding_service
+from tta_backend.utils.streaming import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +118,9 @@ class _SlidingWindowLimiter:
             return max(0.0, send_at - now)
 
 
-# One limiter per credential. Today every call shares the app-level key, so
-# this behaves exactly like a single global limiter — but EPA's cap is
-# per-credential, so keying it this way is what lets per-user keys actually
-# buy independent budgets instead of queueing behind one another.
+# One limiter per credential. EPA's cap is per-credential, so keying it this
+# way is what lets researchers with their own epa_aqs connector key buy
+# independent budgets instead of queueing behind the shared app key.
 _rate_limiters: dict[str, _SlidingWindowLimiter] = {}
 _rate_limiter_registry_lock = threading.Lock()
 
@@ -229,23 +231,70 @@ def _reset_aqs_request_state() -> None:
         _rate_limiters.clear()
 
 
-async def _aqs_get(endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """GET request to the AQS API; raises on HTTP errors or unexpected statuses.
+@dataclass(frozen=True)
+class _AqsCredential:
+    email: str
+    key: str
+    # The researcher whose epa_aqs connector supplied this pair; None for
+    # the shared app credential.
+    user_id: Optional[str] = None
 
-    Identical (endpoint, params) pairs are served from the response cache,
-    which spans the tool calls of a turn and — for measurements EPA has
-    already settled — later turns and other researchers too. A cache hit
-    neither waits nor consumes a rate-limit slot.
-    """
-    full_params = {**params, "email": AQS_EMAIL, "key": AQS_KEY}
-    cache_key = _cache_key(endpoint, params)
-    cached = _response_cache.get(cache_key)
-    if cached is not None:
-        expires_at, payload = cached
-        if _now() < expires_at:
-            return payload
-        del _response_cache[cache_key]
-    wait_seconds = _limiter_for(AQS_KEY).reserve()
+
+class AqsCredentialsRejected(RuntimeError):
+    """EPA answered that the email/key pair is not valid."""
+
+
+class AqsUnavailable(RuntimeError):
+    """EPA could not be reached or answered with something other than a
+    verdict on the credentials."""
+
+
+def _shared_credential() -> _AqsCredential:
+    return _AqsCredential(AQS_EMAIL, AQS_KEY)
+
+
+async def _resolve_credential() -> _AqsCredential:
+    """The caller's own epa_aqs connector pair when they have a live one,
+    otherwise the shared app credential. A failing lookup degrades to the
+    shared credential rather than taking ground data down with it."""
+    user_id = current_user_id()
+    if user_id is None:
+        return _shared_credential()
+    try:
+        personal = await get_aqs_credential_injector().resolve_credentials(user_id)
+    except Exception:
+        logger.warning("aqs_credential_lookup_failed", extra={"_event": "aqs_credential_lookup_failed"})
+        return _shared_credential()
+    if personal is None:
+        return _shared_credential()
+    return _AqsCredential(personal.email, personal.key, user_id)
+
+
+def _scrub(text: str, credential: _AqsCredential) -> str:
+    """EPA echoes the request URL, email and key included, in its Header."""
+    for secret in (credential.key, credential.email):
+        if secret:
+            text = text.replace(secret, "REDACTED")
+    return text
+
+
+def _header_error_text(header: Dict[str, Any]) -> str:
+    detail = header.get("error") or header.get("status") or ""
+    if isinstance(detail, (list, tuple)):
+        detail = "; ".join(str(item) for item in detail)
+    return str(detail)
+
+
+def _is_credential_rejection(detail: str) -> bool:
+    # EPA's wording for a bad pair, observed live: "Email and/or key are invalid."
+    return "email and/or key" in detail.lower()
+
+
+async def _aqs_request(endpoint: str, params: Dict[str, Any], credential: _AqsCredential) -> Dict[str, Any]:
+    """One uncached GET with ``credential``, paced by that credential's own
+    rate limiter. Raises AqsCredentialsRejected when EPA refuses the pair."""
+    full_params = {**params, "email": credential.email, "key": credential.key}
+    wait_seconds = _limiter_for(credential.key).reserve()
     if wait_seconds > 0:
         await asyncio.sleep(wait_seconds)
     async with httpx.AsyncClient(timeout=30) as client:
@@ -254,35 +303,88 @@ async def _aqs_get(endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
         try:
             body = resp.json()
             aqs_header = body.get("Header", [{}])
-            aqs_msg = aqs_header[0].get("error") or aqs_header[0].get("status", "")
-            raise RuntimeError(
-                f"AQS HTTP {resp.status_code} on {endpoint}: {aqs_msg or resp.text[:300]}"
-            )
-        except (ValueError, KeyError):
+            aqs_msg = _header_error_text(aqs_header[0])
+        except (ValueError, KeyError, IndexError, AttributeError):
             resp.raise_for_status()
+            raise
+        if _is_credential_rejection(aqs_msg):
+            raise AqsCredentialsRejected(f"AQS HTTP {resp.status_code} on {endpoint}: {aqs_msg}")
+        raise RuntimeError(
+            f"AQS HTTP {resp.status_code} on {endpoint}: {_scrub(aqs_msg or resp.text[:300], credential)}"
+        )
     data: Dict[str, Any] = resp.json()
     header = data.get("Header", [{}])
     status = header[0].get("status", "").lower()
     rows = len(data.get("Data", data.get("Body", [])))
+    # The query itself is in httpx's request line, which configure_logging
+    # redacts; this line carries only what httpx cannot see.
     logger.debug(
-        "EPA response endpoint=%s http=%s header_status=%r rows=%s url=%s",
+        "EPA response endpoint=%s http=%s header_status=%r rows=%s",
         endpoint,
         resp.status_code,
         header[0].get("status", ""),
         rows,
-        str(resp.url),
     )
     # "No data matched your selection" is a valid empty result, not an error
     if status not in ("success", "no data matched your selection", ""):
         # Surface only AQS's own human-readable error text — the full header
         # dict is an internal dump that a model would relay verbatim.
-        detail = header[0].get("error") or header[0].get("status") or "unexpected response"
-        if isinstance(detail, (list, tuple)):
-            detail = "; ".join(str(item) for item in detail)
-        logger.warning("aqs_error endpoint=%s header=%r", endpoint, header[0])
-        raise RuntimeError(f"EPA AQS request failed: {detail}")
+        detail = _header_error_text(header[0]) or "unexpected response"
+        logged_header = {k: v for k, v in header[0].items() if k != "url"}
+        logger.warning("aqs_error endpoint=%s header=%r", endpoint, logged_header)
+        if _is_credential_rejection(detail):
+            raise AqsCredentialsRejected(f"EPA AQS request failed: {detail}")
+        raise RuntimeError(f"EPA AQS request failed: {_scrub(detail, credential)}")
+    return data
+
+
+async def _aqs_get(endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """GET request to the AQS API; raises on HTTP errors or unexpected statuses.
+
+    Identical (endpoint, params) pairs are served from the response cache,
+    which spans the tool calls of a turn and — for measurements EPA has
+    already settled — later turns and other researchers too. A cache hit
+    neither waits nor consumes a rate-limit slot, and needs no credential.
+
+    A miss goes out on the caller's own epa_aqs connector pair when they
+    have one. If EPA rejects it, the connector is flagged so the Connectors
+    tab shows the error, and the call is retried once on the shared app
+    credential.
+    """
+    cache_key = _cache_key(endpoint, params)
+    cached = _response_cache.get(cache_key)
+    if cached is not None:
+        expires_at, payload = cached
+        if _now() < expires_at:
+            return payload
+        del _response_cache[cache_key]
+    credential = await _resolve_credential()
+    try:
+        data = await _aqs_request(endpoint, params, credential)
+    except AqsCredentialsRejected:
+        if credential.user_id is None:
+            raise
+        logger.warning("aqs_personal_key_rejected", extra={"_event": "aqs_personal_key_rejected"})
+        await get_aqs_credential_injector().mark_invalid(credential.user_id)
+        data = await _aqs_request(endpoint, params, _shared_credential())
+    else:
+        if credential.user_id is not None:
+            get_aqs_credential_injector().mark_used(credential.user_id)
     _remember_response(cache_key, data, _cache_ttl_seconds(params))
     return data
+
+
+async def validate_aqs_credentials(email: str, key: str) -> None:
+    """Prove EPA accepts ``email``/``key`` with one cheap live call, never
+    answered from the response cache (which is keyed without credentials).
+    Raises AqsCredentialsRejected for a bad pair, AqsUnavailable when EPA
+    gives no verdict."""
+    try:
+        await _aqs_request("list/states", {}, _AqsCredential(email, key))
+    except AqsCredentialsRejected:
+        raise
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        raise AqsUnavailable("EPA AQS did not answer the credential check") from exc
 
 
 def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
