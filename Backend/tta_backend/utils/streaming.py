@@ -51,6 +51,10 @@ _current_thread_id: ContextVar[Optional[str]] = ContextVar("current_thread_id", 
 _current_user_id: ContextVar[Optional[str]] = ContextVar("current_user_id", default=None)
 _current_user_message: ContextVar[Optional[str]] = ContextVar("current_user_message", default=None)
 _ground_validation_allowed: ContextVar[bool] = ContextVar("ground_validation_allowed", default=True)
+# T64 Phase 4: (lane id, lane label) of the dispatch item whose run is in
+# progress. Narration emitted inside it is tagged with the lane, so parallel
+# sub-agents' statuses can be shown apart. None outside a dispatch.
+_dispatch_lane: ContextVar[Optional[tuple[str, str]]] = ContextVar("dispatch_lane", default=None)
 _call_budget: ContextVar[Optional[dict[str, Any]]] = ContextVar("call_budget", default=None)
 # Per-turn MCP transport-failure circuit breaker state (storm containment,
 # 2026-07-20). A mutable dict {"consecutive": int, "tripped": bool} bound once
@@ -226,6 +230,23 @@ def ground_validation_scope(allowed: bool) -> Iterator[None]:
 
 
 @contextmanager
+def dispatch_lane_scope(lane_id: str, label: str) -> Iterator[None]:
+    """Tag every status/job_progress event emitted inside with this lane."""
+    token = _dispatch_lane.set((lane_id, label))
+    try:
+        yield
+    finally:
+        _dispatch_lane.reset(token)
+
+
+def _with_lane(payload: dict[str, Any]) -> dict[str, Any]:
+    lane = _dispatch_lane.get()
+    if lane is None:
+        return payload
+    return {**payload, "lane": lane[0], "lane_label": lane[1]}
+
+
+@contextmanager
 def user_id_context(user_id: str) -> Iterator[None]:
     """Bind ``current_user_id()`` for non-chat endpoints (e.g. the jobs
     endpoint) that call workspace-bound MCP tools outside of stream_response,
@@ -318,10 +339,11 @@ async def stream_response(
             payload["stage"] = stage
         if detail is not None:
             payload["detail"] = detail
-        loop.call_soon_threadsafe(queue.put_nowait, ("status", payload))
+        loop.call_soon_threadsafe(queue.put_nowait, ("status", _with_lane(payload)))
 
     def publish_job_progress(data: dict[str, Any]) -> None:
         _touch()
+        data = _with_lane(data)
         if parent_job_progress_emitter:
             parent_job_progress_emitter(data)
         loop.call_soon_threadsafe(queue.put_nowait, ("job_progress", data))

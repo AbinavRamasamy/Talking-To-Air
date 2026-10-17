@@ -69,9 +69,15 @@ class DispatchStageForwardingTests(unittest.IsolatedAsyncioTestCase):
 
         events = [event async for event in stream_response(OuterAgent(), "do it", "outer-thread")]
 
-        status_events = [data for event_type, data in events if event_type == "status"]
+        # The dispatch executor's own lane markers (T64 Phase 4) aside, the
+        # sub-agent's stage arrives exactly once, tagged with its lane.
+        status_events = [
+            data for event_type, data in events
+            if event_type == "status" and data.get("stage") not in ("queued", "running", "finished")
+        ]
         self.assertEqual([s.get("stage") for s in status_events], ["search"])
         self.assertEqual(status_events[0]["message"], "Searching datasets...")
+        self.assertEqual(status_events[0]["lane"], "1.0")
 
     async def test_a_sub_agent_chart_and_job_progress_also_reach_the_outer_stream(self):
         from tta_backend.utils.streaming import emit_chart, emit_job_progress, stream_response

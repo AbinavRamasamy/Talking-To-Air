@@ -15,9 +15,17 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from tta_backend.config.settings import get_settings
-from tta_backend.models import AgentRequest, AgentResult, DispatchItemResult, DispatchResult, canonical_key
+from tta_backend.config.workflow_stages import STAGE_FINISHED, STAGE_QUEUED, STAGE_RUNNING
+from tta_backend.models import (
+    AgentRequest,
+    AgentResult,
+    DispatchItemResult,
+    DispatchResult,
+    GroundRequest,
+    canonical_key,
+)
 from tta_backend.services.subagent_dispatch import render_unexpected_exception
-from tta_backend.utils.streaming import current_thread_id, get_call_budget
+from tta_backend.utils.streaming import current_thread_id, dispatch_lane_scope, emit_status, get_call_budget
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +110,8 @@ async def execute_dispatch(requests: list[AgentRequest], run_one: RunOne) -> Dis
         state.rounds_used += 1
         state.runs_used += len(new)
         for key, request in new.items():
-            state.runs[key] = asyncio.create_task(_run_capped(state, request, run_one))
+            lane = f"{state.rounds_used}.{keys.index(key)}"
+            state.runs[key] = asyncio.create_task(_run_capped(state, request, run_one, lane))
 
     outcomes = await asyncio.gather(*(state.runs[key] for key in keys))
     owners = {key: keys.index(key) for key in new}
@@ -140,7 +149,19 @@ def _log_batch(state: _TurnState, batch: DispatchResult, *, reason: str | None =
     )
 
 
-async def _run_capped(state: _TurnState, request: AgentRequest, run_one: RunOne) -> _Outcome:
+def _lane_label(request: AgentRequest) -> str:
+    """How the workflow strip names a request's lane."""
+    if isinstance(request, GroundRequest):
+        return f"Ground · {request.pollutant} · {request.location}"
+    return f"Satellite · {request.variable} · {request.location}"
+
+
+async def _run_capped(state: _TurnState, request: AgentRequest, run_one: RunOne, lane: str) -> _Outcome:
+    with dispatch_lane_scope(lane, _lane_label(request)):
+        return await _run_in_lane(state, request, run_one)
+
+
+async def _run_in_lane(state: _TurnState, request: AgentRequest, run_one: RunOne) -> _Outcome:
     """One request's run. A failure becomes that item's taxonomy answer, never
     the batch's: the other items' work stands (D10)."""
     # The agent's own cap is taken before the shared one, so a satellite run
@@ -148,8 +169,11 @@ async def _run_capped(state: _TurnState, request: AgentRequest, run_one: RunOne)
     agent_cap = state.satellite if request.agent == "satellite" else contextlib.nullcontext()
     loop = asyncio.get_running_loop()
     queued = loop.time()
+    if state.total.locked() or (request.agent == "satellite" and state.satellite.locked()):
+        emit_status("Waiting for a free slot", stage=STAGE_QUEUED)
     async with agent_cap, state.total:
         started = loop.time()
+        emit_status("Running", stage=STAGE_RUNNING)
         outcome: _Outcome
         try:
             outcome = "ok", await run_one(request)
@@ -167,4 +191,5 @@ async def _run_capped(state: _TurnState, request: AgentRequest, run_one: RunOne)
                 "_run_seconds": round(loop.time() - started, 3),
             },
         )
+        emit_status("Done" if outcome[0] == "ok" else "Failed", stage=STAGE_FINISHED)
         return outcome

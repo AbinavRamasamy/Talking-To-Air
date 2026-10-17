@@ -12,17 +12,44 @@ export const INITIAL_WORKFLOW_STATE = {
   detail: null,
   failedStage: null,
   active: false,
+  // T64 Phase 4: one row per sub-agent the supervisor runs in parallel,
+  // in order of first appearance. Events carrying a `lane` land here.
+  lanes: [],
+}
+
+// The row for `data.lane`, updated by `change`, appended if it is new.
+function updateLane(lanes, data, change) {
+  const existing = lanes.find(row => row.lane === data.lane)
+  const row = existing || {
+    lane: data.lane, label: data.lane_label || '', stage: null, message: '', detail: null, done: false,
+  }
+  const updated = { ...row, ...change(row) }
+  return existing ? lanes.map(r => (r === existing ? updated : r)) : [...lanes, updated]
 }
 
 export function applyWorkflowEvent(state, event, data) {
   switch (event) {
     case 'status': {
+      if (data?.lane) {
+        const lanes = updateLane(state.lanes || [], data, row => ({
+          stage: data.stage ?? row.stage,
+          message: data.message ?? row.message,
+          detail: 'detail' in data && data.detail != null ? data.detail : row.detail,
+          // The executor closes every lane with stage 'finished' (message
+          // "Done" or "Failed"); the row stays, so the other lanes still read.
+          done: data.stage === 'finished' || row.done,
+        }))
+        return { ...state, lanes, active: true }
+      }
       const message = data?.message ?? state.label
       const stage = data?.stage ?? state.stage
       const detail = data && 'detail' in data && data.detail != null ? data.detail : state.detail
       return { ...state, stage, label: message, detail, active: true }
     }
     case 'job_progress': {
+      if (data?.lane && typeof data.progress === 'number') {
+        return { ...state, lanes: updateLane(state.lanes || [], data, () => ({ detail: data.progress })), active: true }
+      }
       if (data && typeof data.progress === 'number') {
         return { ...state, detail: data.progress, active: true }
       }
