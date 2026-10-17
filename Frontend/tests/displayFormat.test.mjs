@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { formatUnits, formatScientific, formatStatValue, scaledTicks, scaledUnitsLabel, superscriptRuns, plotlySuperscript } from '../src/utils/displayFormat.js'
+import { formatUnits, formatScientific, formatStatValue, scaledTicks, scaledUnitsLabel, superscriptRuns, plotlySuperscript, compactDate } from '../src/utils/displayFormat.js'
 
 test('caret exponents become superscripts', () => {
   assert.equal(formatUnits('molecules/cm^2'), 'molecules/cm²')
@@ -97,4 +97,13 @@ test('exponent runs split out as plain digits to render in <sup>', () => {
 test('plotly text carries exponents as <sup> markup', () => {
   assert.equal(plotlySuperscript('molecules/cm²'), 'molecules/cm<sup>2</sup>')
   assert.equal(plotlySuperscript('mean (× 10¹⁵ mol m⁻²)'), 'mean (× 10<sup>15</sup> mol m<sup>-2</sup>)')
+})
+
+test('timestamps show as their calendar date', () => {
+  assert.equal(compactDate('2026-06-04T10:26:42.031514624'), '2026-06-04')
+  assert.equal(compactDate('2026-06-05T00:00:00Z'), '2026-06-05')
+  assert.equal(compactDate('2026-06-05'), '2026-06-05')
+  assert.equal(compactDate(''), '')
+  assert.equal(compactDate(null), '')
+  assert.equal(compactDate('June 2026'), 'June 2026')
 })

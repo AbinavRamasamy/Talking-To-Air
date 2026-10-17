@@ -89,3 +89,11 @@ export function superscriptRuns(text) {
 export function plotlySuperscript(text) {
   return superscriptRuns(text).map(run => (run.sup ? `<sup>${run.text}</sup>` : run.text)).join('')
 }
+
+/** An ISO timestamp as its calendar date (`2026-06-04T10:26:42.03` → `2026-06-04`).
+ * Anything that does not start with a date passes through. */
+export function compactDate(value) {
+  if (!value) return ''
+  const text = String(value)
+  return /^\d{4}-\d{2}-\d{2}(T|$)/.test(text) ? text.slice(0, 10) : text
+}

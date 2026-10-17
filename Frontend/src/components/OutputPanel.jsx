@@ -21,7 +21,7 @@ import { MetaField } from './metadataPrimitives.jsx'
 import { smallButtonStyle, copyToClipboard } from '../utils/metadataUiHelpers.js'
 import { resolveMasking, resolveRegionFidelity, formatQaPassRate, regionTypeNote, regionOriginNote } from '../utils/maskingProvenance'
 import { evidenceRows } from '../utils/evidenceSummary'
-import { formatStatValue, formatUnits } from '../utils/displayFormat.js'
+import { compactDate, formatStatValue, formatUnits } from '../utils/displayFormat.js'
 import SciText from './SciText.jsx'
 import { filledCharts } from '../utils/compareMode'
 import { focusChartPayload } from '../utils/compareSlotOverview'
@@ -57,11 +57,6 @@ const panelRootStyle = {
 // Most branches also clip their own overflow; the empty state deliberately does
 // not, because it centres its content rather than scrolling it.
 const panelRootClipped = { ...panelRootStyle, overflow: 'hidden' }
-
-function compactDate(value) {
-  if (!value) return ''
-  return String(value).replace('T00:00:00', '').replace('T23:59:59', '').replace(/Z$/, '')
-}
 
 function chartTitle(chart) {
   return chart.title || chart.provenance?.variable || chart.variable || 'Output'
