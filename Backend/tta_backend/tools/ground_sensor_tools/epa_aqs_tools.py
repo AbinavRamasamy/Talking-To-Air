@@ -316,13 +316,14 @@ async def _aqs_request(endpoint: str, params: Dict[str, Any], credential: _AqsCr
     header = data.get("Header", [{}])
     status = header[0].get("status", "").lower()
     rows = len(data.get("Data", data.get("Body", [])))
+    # The query itself is in httpx's request line, which configure_logging
+    # redacts; this line carries only what httpx cannot see.
     logger.debug(
-        "EPA response endpoint=%s http=%s header_status=%r rows=%s params=%r",
+        "EPA response endpoint=%s http=%s header_status=%r rows=%s",
         endpoint,
         resp.status_code,
         header[0].get("status", ""),
         rows,
-        params,
     )
     # "No data matched your selection" is a valid empty result, not an error
     if status not in ("success", "no data matched your selection", ""):

@@ -836,7 +836,10 @@ class AqsPerUserCredentialTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("my-key", text)
         self.assertNotIn("me@lab.edu", text)
         self.assertNotIn("testkey", text)
-        self.assertIn("88101", text)  # the query itself stays debuggable
+        self.assertIn("endpoint=dailyData/bySite", text)
+        # The query values are left to httpx's request line, which
+        # configure_logging redacts; this module logs none of them.
+        self.assertNotIn("88101", text)
 
     async def test_a_failed_header_warning_does_not_repeat_the_echoed_credentials(self):
         """EPA's Header echoes the full request URL, email and key included."""
