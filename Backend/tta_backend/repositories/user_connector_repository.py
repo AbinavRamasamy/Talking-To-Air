@@ -69,7 +69,7 @@ async def upsert_connector(
     connector_type: str,
     auth_method: str,
     encrypted_secret: str,
-    expires_at: datetime,
+    expires_at: datetime | None,
     status: str = "connected",
 ) -> dict[str, Any]:
     """Insert or replace the caller's row for this connector type -- re-paste

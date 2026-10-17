@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security.utils import get_authorization_scheme_param
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from redis import asyncio as aioredis
 from redis.exceptions import RedisError
 from starlette.routing import Match
@@ -61,7 +61,12 @@ from tta_backend.repositories.artifact_repository import ensure_artifact_table
 from tta_backend.services import admission
 from tta_backend.services import cube_cache, frame_store, overlay_store, turn_registry, warmup
 from tta_backend.services.open_handle import OPEN_PIPELINE_VERSION, sweep_extract_cache
-from tta_backend.services.connector_credential_service import EdlCredentialInjector
+from tta_backend.services.connector_credential_service import (
+    CONNECTOR_TYPE_EARTHDATA,
+    CONNECTOR_TYPE_EPA_AQS,
+    EdlCredentialInjector,
+    get_aqs_credential_injector,
+)
 from tta_backend.services.connector_token_service import TokenValidationError, decode_token_expiry
 from tta_backend.services.artifact_store import artifact_store
 from tta_backend.services.chat_stream_service import ChatStreamService
@@ -98,6 +103,11 @@ from tta_backend.utils.metrics import (
     refresh_process_gauges,
     render_prometheus_metrics,
     set_db_pool_connections_active,
+)
+from tta_backend.tools.ground_sensor_tools.epa_aqs_tools import (
+    AqsCredentialsRejected,
+    AqsUnavailable,
+    validate_aqs_credentials,
 )
 from tta_backend.utils.streaming import current_user_id, iter_with_user_id, user_id_context
 
@@ -146,6 +156,9 @@ async def _on_earthdata_mcp_ready(tools: dict[str, Any]) -> None:
 # last_used_at coalescing are only meaningful as process-lifetime state, and
 # the connector endpoints below invalidate it directly on re-paste/disconnect.
 edl_credential_injector = EdlCredentialInjector(settings)
+# The same instance epa_aqs_tools resolves through, so invalidating it here
+# reaches the AQS client.
+aqs_credential_injector = get_aqs_credential_injector()
 earthdata_mcp_manager = EarthdataMCPConnectionManager(
     settings, current_user_id, on_ready=_on_earthdata_mcp_ready, edl_injector=edl_credential_injector,
 )
@@ -593,22 +606,27 @@ class DiscoveryGranulesRequest(BaseModel):
 class SetConnectorTokenRequest(BaseModel):
     token: str = Field(min_length=1, max_length=8192)
 
+class SetConnectorCredentialsRequest(BaseModel):
+    email: Annotated[str, StringConstraints(strip_whitespace=True, max_length=320, pattern=r"^[^@\s]+@[^@\s]+$")]
+    key: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
+
 class ConnectorStatusView(BaseModel):
     connector_type: str
     display_name: str
     auth_method: str
     description: str
     token_docs_url: str
+    docs_link_label: str
     status: str
     connected_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
 
-# T30: per-user connector (e.g. Earthdata Login) token storage. Registry-
-# driven -- CONNECTOR_REGISTRY is the single source of what cards the
-# frontend can render and what connector_type values these endpoints accept.
-# No endpoint here ever selects or returns encrypted_secret (see
-# repositories/user_connector_repository.py); this phase only stores the
-# token, nothing consumes it yet.
+# T30: per-user connector (Earthdata Login token, EPA AQS email + key)
+# storage. Registry-driven -- CONNECTOR_REGISTRY is the single source of what
+# cards the frontend can render and what connector_type values these
+# endpoints accept. No endpoint here ever selects or returns
+# encrypted_secret (see repositories/user_connector_repository.py), and the
+# AQS email is stored only inside it, so no response carries it either.
 def _connector_status(row: dict[str, Any] | None) -> str:
     if row is None:
         return "not_connected"
@@ -627,6 +645,7 @@ def _connector_view(entry: dict[str, Any], row: dict[str, Any] | None) -> Connec
         auth_method=entry["auth_method"],
         description=entry["description"],
         token_docs_url=entry["token_docs_url"],
+        docs_link_label=entry["docs_link_label"],
         status=_connector_status(row),
         connected_at=row.get("connected_at") if row else None,
         expires_at=row.get("expires_at") if row else None,
@@ -650,6 +669,23 @@ def _connector_registry_entry(connector_type: str) -> dict[str, Any]:
     return entry
 
 
+def _require_auth_method(entry: dict[str, Any], auth_method: str) -> None:
+    if entry["auth_method"] != auth_method:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{entry['display_name']} is not connected this way.",
+        )
+
+
+def _invalidate_connector_cache(connector_type: str, user_id: str) -> None:
+    """T31: a re-paste or disconnect must never be shadowed by the
+    injector's short-TTL cache of the previous (possibly invalid) row."""
+    if connector_type == CONNECTOR_TYPE_EARTHDATA:
+        edl_credential_injector.invalidate(user_id)
+    elif connector_type == CONNECTOR_TYPE_EPA_AQS:
+        aqs_credential_injector.invalidate(user_id)
+
+
 @app.get("/connectors")
 @limiter.limit("60/minute")
 async def list_connectors_endpoint(request: Request) -> dict[str, Any]:
@@ -663,6 +699,7 @@ async def list_connectors_endpoint(request: Request) -> dict[str, Any]:
 async def set_connector_token_endpoint(connector_type: ConnectorType, req: SetConnectorTokenRequest, request: Request) -> ConnectorStatusView:
     cipher = _require_connector_cipher()
     entry = _connector_registry_entry(connector_type)
+    _require_auth_method(entry, "token")
     try:
         expires_at = decode_token_expiry(req.token)
     except TokenValidationError as exc:
@@ -672,9 +709,38 @@ async def set_connector_token_endpoint(connector_type: ConnectorType, req: SetCo
     row = await upsert_connector(
         request.state.current_user.id, connector_type, entry["auth_method"], encrypted_secret, expires_at,
     )
-    # T31: a re-paste must never be shadowed by the injector's short-TTL
-    # cache of the previous (possibly invalid/expired) row.
-    edl_credential_injector.invalidate(request.state.current_user.id)
+    _invalidate_connector_cache(connector_type, request.state.current_user.id)
+    return _connector_view(entry, row)
+
+
+@app.put("/connectors/{connector_type}/credentials")
+@limiter.limit("5/minute")
+async def set_connector_credentials_endpoint(
+    connector_type: ConnectorType, req: SetConnectorCredentialsRequest, request: Request,
+) -> ConnectorStatusView:
+    """Stores an email + key pair (EPA AQS) after one live check against
+    the service. AQS keys never expire, so the row has no expires_at."""
+    cipher = _require_connector_cipher()
+    entry = _connector_registry_entry(connector_type)
+    _require_auth_method(entry, "email_key")
+    try:
+        await validate_aqs_credentials(req.email, req.key)
+    except AqsCredentialsRejected as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="EPA didn't accept that email and key. Check both match the signup email EPA sent.",
+        ) from exc
+    except AqsUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Couldn't reach EPA AQS to check that key. Try again in a minute.",
+        ) from exc
+
+    encrypted_secret = encrypt_secret(cipher, json.dumps({"email": req.email, "key": req.key}))
+    row = await upsert_connector(
+        request.state.current_user.id, connector_type, entry["auth_method"], encrypted_secret, None,
+    )
+    _invalidate_connector_cache(connector_type, request.state.current_user.id)
     return _connector_view(entry, row)
 
 
@@ -684,9 +750,7 @@ async def disconnect_connector_endpoint(connector_type: ConnectorType, request: 
     _require_connector_cipher()
     entry = _connector_registry_entry(connector_type)
     await delete_connector(request.state.current_user.id, connector_type)
-    # T31: a disconnect must never leave a stale cached token injectable
-    # for the rest of the cache's TTL window.
-    edl_credential_injector.invalidate(request.state.current_user.id)
+    _invalidate_connector_cache(connector_type, request.state.current_user.id)
     return _connector_view(entry, None)
 
 

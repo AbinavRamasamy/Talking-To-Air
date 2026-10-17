@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { apiFetch } from '../utils/apiFetch.js'
 import { API_BASE } from '../config.js'
+import { buildCredentialRequest, errorDetail } from '../utils/connectorCard.js'
 
 // 503 means the server has no connector store configured, not a failure.
 async function requestConnectors() {
@@ -39,25 +40,28 @@ export function useConnectors() {
 
   useEffect(() => { loadConnectors() }, [loadConnectors])
 
-  const setToken = useCallback(async (connectorType, token) => {
-    const res = await apiFetch(`${API_BASE}/connectors/${connectorType}/token`, {
+  // values holds the card form's fields (connectorCard.credentialFields).
+  const saveCredentials = useCallback(async (connector, values) => {
+    const request = buildCredentialRequest(connector, values)
+    if (!request) throw new Error('Fill in every field before saving.')
+    const res = await apiFetch(`${API_BASE}${request.path}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
+      body: JSON.stringify(request.body),
     })
     const data = await res.json().catch(() => null)
-    if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`)
-    setConnectors(prev => prev.map(c => (c.connector_type === connectorType ? data : c)))
+    if (!res.ok) throw new Error(errorDetail(data) || `HTTP ${res.status}`)
+    setConnectors(prev => prev.map(c => (c.connector_type === connector.connector_type ? data : c)))
     return data
   }, [])
 
   const disconnect = useCallback(async (connectorType) => {
     const res = await apiFetch(`${API_BASE}/connectors/${connectorType}`, { method: 'DELETE' })
     const data = await res.json().catch(() => null)
-    if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`)
+    if (!res.ok) throw new Error(errorDetail(data) || `HTTP ${res.status}`)
     setConnectors(prev => prev.map(c => (c.connector_type === connectorType ? data : c)))
     return data
   }, [])
 
-  return { connectors, loading, error, notConfigured, fetchConnectors, setToken, disconnect }
+  return { connectors, loading, error, notConfigured, fetchConnectors, saveCredentials, disconnect }
 }
