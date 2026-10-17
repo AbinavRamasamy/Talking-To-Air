@@ -129,8 +129,8 @@ def render_task(request: AgentRequest, user_message: str | None) -> str:
     lines, which are its task, then the researcher's own message (bound
     server-side, never written by the model) as context. The message comes
     last and is labeled context because one question often spans several
-    requests: given it as the authority, a ground run also did the
-    satellite half of the question. A pure template, so the same request
+    requests, and a sub-agent that takes it as its task widens into the
+    parts other agents were sent. A pure template, so the same request
     always renders to the same text."""
     lines = [f"Intent: {request.intent}"]
     if isinstance(request, SatelliteRequest):

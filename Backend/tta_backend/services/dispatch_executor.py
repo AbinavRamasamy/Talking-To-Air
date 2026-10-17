@@ -51,11 +51,25 @@ class _TurnState:
     # canonical_key -> the run of that request, finished or still going. A
     # repeat awaits the same run instead of starting another (D9).
     runs: dict[str, asyncio.Task[_Outcome]] = field(default_factory=dict)
+    # A round is one supervisor model step: dispatch calls from the same model
+    # message (which ToolNode runs together) share it. ``step`` counts model
+    # calls (begin_model_step); ``round_step`` is the step the last round
+    # opened in; the step_* counters describe the step in progress.
+    step: int = 0
+    round_step: int = -1
+    lane_seq: int = 0
+    step_calls: int = 0
+    step_new_runs: int = 0
+    # Set once dispatch can do nothing more this turn; the supervisor then
+    # gets tool_choice "none" and must answer.
+    closed: bool = False
+    # Serializes saving the per-thread contexts sibling dispatch calls capture.
+    persist_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    def refusal(self, new_runs: int) -> str | None:
+    def refusal(self, new_runs: int, opens_round: bool) -> str | None:
         """Why a call needing ``new_runs`` sub-agent runs may not proceed, or
         None if it may."""
-        if self.rounds_used >= self.max_rounds:
+        if opens_round and self.rounds_used >= self.max_rounds:
             return f"dispatch round limit reached ({self.max_rounds} per turn); answer from the results already received"
         if self.runs_used + new_runs > self.max_runs:
             return (
@@ -63,6 +77,29 @@ class _TurnState:
                 f"this dispatch needs {new_runs}; nothing in it was run"
             )
         return None
+
+
+def begin_model_step() -> bool:
+    """Start a supervisor model step; return whether the dispatch tool is
+    still worth offering. It closes for the rest of the turn once both rounds
+    or the run budget are used, or once a step's dispatch calls started
+    nothing new (all duplicate or rejected): a model repeating such a call
+    gets the same answer every time, and would loop until the recursion
+    limit rather than answer."""
+    state = _turn_state()
+    stalled = state.step_calls > 0 and state.step_new_runs == 0
+    if stalled or state.rounds_used >= state.max_rounds or state.runs_used >= state.max_runs:
+        state.closed = True
+    state.step += 1
+    state.step_calls = 0
+    state.step_new_runs = 0
+    return not state.closed
+
+
+def dispatch_persist_lock() -> asyncio.Lock:
+    """The turn's lock around saving dispatch-captured context, so sibling
+    dispatch calls do not race on the thread's read-merge-write."""
+    return _turn_state().persist_lock
 
 
 def _turn_state() -> _TurnState:
@@ -89,6 +126,7 @@ async def execute_dispatch(requests: list[AgentRequest], run_one: RunOne) -> Dis
     exceed the turn's budget or round limit is rejected whole and nothing in
     it runs."""
     state = _turn_state()
+    state.step_calls += 1
     keys = [canonical_key(request) for request in requests]
     new: dict[str, AgentRequest] = {}
     for key, request in zip(keys, requests, strict=True):
@@ -98,7 +136,8 @@ async def execute_dispatch(requests: list[AgentRequest], run_one: RunOne) -> Dis
     # Checked, reserved and registered with no await in between, so a sibling
     # dispatch call cannot slip past the same check or start the same run.
     if new:
-        refusal = state.refusal(len(new))
+        opens_round = state.round_step != state.step
+        refusal = state.refusal(len(new), opens_round)
         if refusal is not None:
             rejected = DispatchResult(results=[
                 DispatchItemResult(index=index, agent=request.agent, intent=request.intent, status="rejected",
@@ -107,10 +146,15 @@ async def execute_dispatch(requests: list[AgentRequest], run_one: RunOne) -> Dis
             ])
             _log_batch(state, rejected, reason=refusal)
             return rejected
-        state.rounds_used += 1
+        if opens_round:
+            state.rounds_used += 1
+            state.round_step = state.step
+            state.lane_seq = 0
         state.runs_used += len(new)
+        state.step_new_runs += len(new)
         for key, request in new.items():
-            lane = f"{state.rounds_used}.{keys.index(key)}"
+            lane = f"{state.rounds_used}.{state.lane_seq}"
+            state.lane_seq += 1
             state.runs[key] = asyncio.create_task(_run_capped(state, request, run_one, lane))
 
     outcomes = await asyncio.gather(*(state.runs[key] for key in keys))

@@ -129,3 +129,17 @@ test('laned job progress sets that lane\'s detail only, and the turn\'s done cle
 
   assert.deepEqual(applyWorkflowEvent(state, 'done', {}).lanes, [])
 })
+
+test('an error during a laned turn names the lane that was still running and its stage', () => {
+  let state = INITIAL_WORKFLOW_STATE
+  state = applyWorkflowEvent(state, 'status', { message: 'Done', stage: 'finished', ...GROUND })
+  state = applyWorkflowEvent(state, 'status', { message: 'Opening retrieved data...', stage: 'open', ...NJ })
+  // The outer turn's own heartbeat is unlaned.
+  state = applyWorkflowEvent(state, 'status', { message: 'Still working', stage: 'working' })
+
+  const failed = applyWorkflowEvent(state, 'error', { detail: 'boom' })
+
+  assert.equal(failed.failedStage, 'open')
+  assert.equal(failed.failedLane, 'Satellite · NO2 · the OTC')
+  assert.equal(failed.active, false)
+})

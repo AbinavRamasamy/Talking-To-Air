@@ -90,6 +90,26 @@ class SupervisorStreamBatchTests(unittest.IsolatedAsyncioTestCase):
         chart_ids = [json.loads(e.split("data: ", 1)[1])["chart_id"] for e in events if e.startswith("event: chart")]
         self.assertEqual(chart_ids, ["c-0", "c-1"])
 
+    async def test_a_batch_tool_result_is_parsed_once(self):
+        """The header and the chart/artifact events both read the batch; a
+        six-item envelope should not be validated twice per event."""
+        from unittest.mock import patch
+
+        from tta_backend.models import AgentResult, DispatchItemResult, DispatchResult
+
+        batch = DispatchResult(results=[
+            DispatchItemResult(index=0, agent="satellite", intent="visualize", status="ok",
+                               result=AgentResult(text="map", charts=[{"type": "heatmap", "chart_id": "c-0"}])),
+        ]).model_dump_json(exclude_none=True)
+
+        real = DispatchResult.model_validate_json
+        with patch.object(DispatchResult, "model_validate_json", side_effect=real) as parse:
+            await self._stream(batch)
+
+        # The answer text is also offered to the parser (and rejected); only
+        # parses of the batch itself count.
+        self.assertEqual(sum(1 for c in parse.call_args_list if c.args[0] == batch), 1)
+
     async def test_the_done_event_merges_suggestions_and_keeps_the_first_picker(self):
         """D13: suggestions concatenate in request order, deduped, capped at
         the envelope's own limit of two; one picker can be shown, so the

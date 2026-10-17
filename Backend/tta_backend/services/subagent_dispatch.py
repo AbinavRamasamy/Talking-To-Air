@@ -318,20 +318,25 @@ async def persist_dispatch_contexts(
         await _persist_satellite_context(conversation_thread_id, {**prior, **satellite_captured})
     ground_captured = _merge_captured_contexts(ground)
     if ground_captured:
-        prior = await get_ground_monitor_context(conversation_thread_id)
-        await save_ground_monitor_context(conversation_thread_id, {**prior, **ground_captured})
+        # Best-effort, like the satellite side: this runs after the batch, so
+        # a raise here would discard every result the batch already has.
+        try:
+            prior = await get_ground_monitor_context(conversation_thread_id)
+            await save_ground_monitor_context(conversation_thread_id, {**prior, **ground_captured})
+        except Exception:
+            logger.warning("ground_context_save_failed", exc_info=True)
 
 
 def _merge_captured_contexts(contexts: list[dict[str, str]]) -> dict[str, str]:
     merged: dict[str, str] = {}
-    chart_ids: list[str] = []
+    chart_ids = ""
     for context in contexts:
         merged.update(context)
         for chart_id in context.get("last_chart_ids", "").split(","):
-            if chart_id and chart_id not in chart_ids:
-                chart_ids.append(chart_id)
+            if chart_id:
+                chart_ids = _with_chart_id(chart_ids, chart_id)
     if chart_ids:
-        merged["last_chart_ids"] = ",".join(chart_ids)
+        merged["last_chart_ids"] = chart_ids
     return merged
 
 
@@ -832,10 +837,15 @@ def _capture_chart_id(data: Any, captured: dict[str, str]) -> None:
     id moves to the most-recent slot rather than duplicating."""
     if not isinstance(data, dict) or not data.get("chart_id"):
         return
-    chart_id = str(data["chart_id"])
-    ids = [i for i in captured.get("last_chart_ids", "").split(",") if i and i != chart_id]
+    captured["last_chart_ids"] = _with_chart_id(captured.get("last_chart_ids", ""), str(data["chart_id"]))
+
+
+def _with_chart_id(chart_ids: str, chart_id: str) -> str:
+    """``chart_ids`` (comma-joined, most recent last) with ``chart_id`` as the
+    most recent; one already present moves there rather than duplicating."""
+    ids = [i for i in chart_ids.split(",") if i and i != chart_id]
     ids.append(chart_id)
-    captured["last_chart_ids"] = ",".join(ids)
+    return ",".join(ids)
 
 
 _EXPLICIT_AREA_PATTERN = re.compile(

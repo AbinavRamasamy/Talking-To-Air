@@ -107,10 +107,11 @@ class DispatchExecutorTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_list_that_would_overrun_the_turns_budget_is_rejected_whole(self):
         """D8: six sub-agent runs per turn. A half-run list would hand the
         model a half-answer to reason about."""
-        from tta_backend.services.dispatch_executor import execute_dispatch
+        from tta_backend.services.dispatch_executor import begin_model_step, execute_dispatch
 
         runner = FakeRunner()
         await execute_dispatch([_sat(f"first {i}") for i in range(4)], runner)
+        begin_model_step()
 
         second = await execute_dispatch([_ground(f"second {i}") for i in range(3)], runner)
 
@@ -120,11 +121,13 @@ class DispatchExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(runner.runs), 4)
 
     async def test_a_third_dispatch_round_is_rejected_even_with_budget_left(self):
-        from tta_backend.services.dispatch_executor import execute_dispatch
+        from tta_backend.services.dispatch_executor import begin_model_step, execute_dispatch
 
         runner = FakeRunner()
         await execute_dispatch([_sat("NJ")], runner)
+        begin_model_step()
         await execute_dispatch([_ground("Newark")], runner)
+        begin_model_step()
 
         third = await execute_dispatch([_ground("Trenton")], runner)
 
@@ -147,10 +150,11 @@ class DispatchExecutorTests(unittest.IsolatedAsyncioTestCase):
         """Replaces the old "[STOP] already called" prose: the model gets the
         answer it already had, so there is nothing to argue with. Rewording
         prior_findings does not make it a new request."""
-        from tta_backend.services.dispatch_executor import execute_dispatch
+        from tta_backend.services.dispatch_executor import begin_model_step, execute_dispatch
 
         runner = FakeRunner()
         await execute_dispatch([_sat(f"region {i}", prior_findings="peak at 40N") for i in range(6)], runner)
+        begin_model_step()
 
         repeat = await execute_dispatch([_sat("region 0", prior_findings="the peak was near 40N")], runner)
 
@@ -197,11 +201,12 @@ class DispatchLoggingTests(unittest.IsolatedAsyncioTestCase):
         return [r for r in captured.records if getattr(r, "_event", None) == event]
 
     async def test_each_dispatch_call_logs_its_items_outcomes_and_the_turns_budget(self):
-        from tta_backend.services.dispatch_executor import execute_dispatch
+        from tta_backend.services.dispatch_executor import begin_model_step, execute_dispatch
 
         runner = FakeRunner(fail={"NY"})
         with self.assertLogs(self.LOGGER, level="INFO") as captured:
             await execute_dispatch([_sat("NJ"), _sat("NY"), _sat("NJ")], runner)
+            begin_model_step()
             await execute_dispatch([_ground("Newark"), _sat("NJ")], runner)
 
         first, second = self._events(captured, "dispatch_batch")
@@ -226,11 +231,13 @@ class DispatchLoggingTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(max(i._wait_seconds for i in items), 0.04)
 
     async def test_a_rejected_dispatch_is_logged_as_a_warning_with_its_reason(self):
-        from tta_backend.services.dispatch_executor import execute_dispatch
+        from tta_backend.services.dispatch_executor import begin_model_step, execute_dispatch
 
         runner = FakeRunner()
         await execute_dispatch([_sat("a")], runner)
+        begin_model_step()
         await execute_dispatch([_sat("b")], runner)
+        begin_model_step()
         with self.assertLogs(self.LOGGER, level="WARNING") as captured:
             await execute_dispatch([_sat("c")], runner)
 
@@ -238,6 +245,69 @@ class DispatchLoggingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(batch.levelname, "WARNING")
         self.assertEqual(batch._statuses, ["rejected"])
         self.assertIn("round limit", batch._reason)
+
+
+class DispatchStepTests(unittest.IsolatedAsyncioTestCase):
+    """A round is one supervisor model step, not one dispatch call; and the
+    supervisor loses the dispatch tool once nothing more can come of it."""
+
+    async def asyncSetUp(self):
+        from tta_backend.utils.streaming import _call_budget
+
+        self._token = _call_budget.set({})
+
+    async def asyncTearDown(self):
+        from tta_backend.utils.streaming import _call_budget
+
+        _call_budget.reset(self._token)
+
+    async def test_sibling_calls_from_one_model_step_share_one_round(self):
+        """ToolNode runs two dispatch calls from one model message together;
+        counting each as a round left no round for the dependent follow-up."""
+        from tta_backend.services.dispatch_executor import begin_model_step, execute_dispatch
+
+        runner = FakeRunner()
+        begin_model_step()
+        await asyncio.gather(
+            execute_dispatch([_sat("NJ")], runner),
+            execute_dispatch([_ground("Newark")], runner),
+        )
+        self.assertTrue(begin_model_step())
+
+        follow_up = await execute_dispatch([_ground("Camden")], runner)
+
+        self.assertEqual([i.status for i in follow_up.results], ["ok"])
+
+    async def test_dispatch_closes_once_both_rounds_are_used(self):
+        from tta_backend.services.dispatch_executor import begin_model_step, execute_dispatch
+
+        runner = FakeRunner()
+        self.assertTrue(begin_model_step())
+        await execute_dispatch([_sat("NJ")], runner)
+        self.assertTrue(begin_model_step())
+        await execute_dispatch([_ground("Newark")], runner)
+
+        self.assertFalse(begin_model_step())
+
+    async def test_dispatch_closes_after_a_step_that_ran_nothing_new(self):
+        """A duplicate-only or rejected call changes nothing, so a model that
+        repeats it would loop until the recursion limit."""
+        from tta_backend.services.dispatch_executor import begin_model_step, execute_dispatch
+
+        runner = FakeRunner()
+        begin_model_step()
+        await execute_dispatch([_sat("NJ")], runner)
+        self.assertTrue(begin_model_step())
+        await execute_dispatch([_sat("NJ")], runner)
+
+        self.assertFalse(begin_model_step())
+        self.assertEqual(runner.runs, ["NJ"])
+
+    async def test_a_step_without_a_dispatch_call_does_not_close_it(self):
+        from tta_backend.services.dispatch_executor import begin_model_step
+
+        self.assertTrue(begin_model_step())
+        self.assertTrue(begin_model_step())
 
 
 if __name__ == "__main__":

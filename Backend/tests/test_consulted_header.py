@@ -39,6 +39,22 @@ class ConsultedHeaderTests(unittest.TestCase):
         self.assertEqual(with_consulted_header("Ozone was moderate.", ["satellite"]),
                          "Agent consulted: SATELLITE\n\nOzone was moderate.")
 
+    def test_text_the_model_wrote_above_its_own_header_is_dropped(self):
+        """The old _strip_supervisor_preamble's job: a model that restates raw
+        data before its header line. On the live stream the server's header
+        comes first, so everything before the LAST header line goes."""
+        from tta_backend.services.consulted_header import with_consulted_header
+
+        for text in (
+            "Here is the NO2 data: 4.1e15, 3.9e15\nAgent consulted: SATELLITE\n\nNO2 peaked near Newark.",
+            "Agent consulted: SATELLITE\n\nHere is the data: 4.1e15\nAgent consulted: SATELLITE\n\nNO2 peaked near Newark.",
+        ):
+            with self.subTest(text=text[:30]):
+                self.assertEqual(
+                    with_consulted_header(text, ["satellite"]),
+                    "Agent consulted: SATELLITE\n\nNO2 peaked near Newark.",
+                )
+
     def test_with_nothing_consulted_no_header_is_claimed(self):
         from tta_backend.services.consulted_header import with_consulted_header
 

@@ -24,6 +24,7 @@ from tta_backend.models import (
     DispatchResult,
     parse_agent_result,
     parse_chart_payload,
+    parse_dispatch_result,
     parse_tool_results,
 )
 from tta_backend.services import admission, cube_cache
@@ -263,11 +264,15 @@ class ChatStreamService:
                             for event in live:
                                 yield event
                         elif event_type == "tool_result":
-                            ran = consulted_agents(data.get("content", ""))
+                            # Parsed once here; the parsers below pass a
+                            # DispatchResult instance straight through.
+                            content = data.get("content", "")
+                            batch = parse_dispatch_result(content)
+                            ran = consulted_agents(batch)
                             turn.consulted += [a for a in ran if a not in turn.consulted]
                             turn.header_due = turn.header_due or bool(ran)
                             async for event in self._tool_result_events(
-                                data.get("content", ""),
+                                batch if batch is not None else content,
                                 thread_id,
                                 user_id,
                                 artifacts,
@@ -606,7 +611,7 @@ class ChatStreamService:
 
     async def _tool_result_events(
         self,
-        content: str,
+        content: Any,
         thread_id: str,
         user_id: str,
         artifacts: list[dict[str, Any]] | None = None,

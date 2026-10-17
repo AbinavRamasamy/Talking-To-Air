@@ -1519,6 +1519,21 @@ class DispatchContextTests(unittest.IsolatedAsyncioTestCase):
         })
         save_ground.assert_awaited_once_with("thread-1", {"name": "Old", "site_id": "34-007-0002"})
 
+    async def test_a_ground_context_store_failure_never_fails_the_batch(self):
+        """Persistence runs after the batch, outside the executor's per-item
+        isolation; an exception here would discard every finished result."""
+        from tta_backend.services import subagent_dispatch
+
+        for failing in ("get_ground_monitor_context", "save_ground_monitor_context"):
+            with self.subTest(failing=failing), \
+                 patch.object(subagent_dispatch, "get_ground_monitor_context", AsyncMock(return_value={})), \
+                 patch.object(subagent_dispatch, "save_ground_monitor_context", AsyncMock()), \
+                 patch.object(subagent_dispatch, failing, AsyncMock(side_effect=RuntimeError("db down"))), \
+                 self.assertLogs("tta_backend.services.subagent_dispatch", level="WARNING"):
+                await subagent_dispatch.persist_dispatch_contexts(
+                    "thread-1", satellite=[], ground=[{"site_id": "34-007-0002"}],
+                )
+
     async def test_a_batch_that_captured_nothing_saves_nothing(self):
         from tta_backend.services import subagent_dispatch
 

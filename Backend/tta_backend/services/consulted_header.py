@@ -36,8 +36,11 @@ def consulted_header(agents: list[str]) -> str | None:
 
 
 def with_consulted_header(text: str, agents: list[str]) -> str:
-    """``text`` opened by the header for ``agents``, with any header line the
-    model wrote removed first."""
-    body = _HEADER_LINE.sub("", text).lstrip()
+    """``text`` opened by the header for ``agents``. Any header line already
+    in the text goes, and so does everything above the last one: text a model
+    writes before its own header restates raw data ahead of the answer, and
+    on the live stream the server's header precedes it."""
+    headers = list(_HEADER_LINE.finditer(text))
+    body = text[headers[-1].end():].lstrip() if headers else text.lstrip()
     header = consulted_header(agents)
     return f"{header}\n\n{body}" if header else body

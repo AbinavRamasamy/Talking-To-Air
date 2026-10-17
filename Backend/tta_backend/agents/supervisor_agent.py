@@ -37,7 +37,7 @@ from tta_backend.models import (
     render_task,
 )
 from tta_backend.services.chart_service import ChartService
-from tta_backend.services.dispatch_executor import execute_dispatch
+from tta_backend.services.dispatch_executor import begin_model_step, dispatch_persist_lock, execute_dispatch
 from tta_backend.services.subagent_dispatch import persist_dispatch_contexts, run_ground, run_satellite
 from tta_backend.utils.db import get_checkpointer
 from tta_backend.utils.message_utils import truncate_text
@@ -112,6 +112,21 @@ async def build_agent(
             trimmed = messages
         return await handler(request.override(messages=trimmed))
 
+    # ── Dispatch closes once it can do nothing more ───────────────────────────
+
+    @wrap_model_call
+    async def dispatch_limit_middleware(
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        # Each model call is a dispatch step. Once both rounds or the run
+        # budget are used, or a step's calls started nothing new, the model is
+        # forbidden tool calls, so it answers instead of repeating a call
+        # until the recursion limit.
+        if not begin_model_step():
+            request = request.override(tool_choice="none")
+        return await handler(request)
+
     # ── The one sub-agent tool ────────────────────────────────────────────────
 
     async def dispatch(requests: list[AgentRequest]) -> str:
@@ -138,11 +153,13 @@ async def build_agent(
         batch = await execute_dispatch(requests, run_one)
         if thread_id is not None and captured:
             in_order = [captured.pop(key) for key in map(canonical_key, requests) if key in captured]
-            await persist_dispatch_contexts(
-                thread_id,
-                satellite=[sink for agent, sink in in_order if agent == "satellite"],
-                ground=[sink for agent, sink in in_order if agent == "ground"],
-            )
+            # Sibling dispatch calls from one model message finish together.
+            async with dispatch_persist_lock():
+                await persist_dispatch_contexts(
+                    thread_id,
+                    satellite=[sink for agent, sink in in_order if agent == "satellite"],
+                    ground=[sink for agent, sink in in_order if agent == "ground"],
+                )
         return await _checkpoint_dispatch_envelope(batch)
 
     dispatch_tool = StructuredTool.from_function(
@@ -162,7 +179,7 @@ async def build_agent(
         tools=[dispatch_tool],
         system_prompt=SUPERVISOR_PROMPT,
         checkpointer=checkpointer,
-        middleware=[trim_middleware],
+        middleware=[trim_middleware, dispatch_limit_middleware],
     )
     return supervisor
 
@@ -206,7 +223,12 @@ def _truncate_text(text: str, max_chars: int, agent_name: str, request_id: str |
 
 
 def _compact_model_input_message(msg: Any) -> Any:
-    """Replace bulky chart payloads with concise summaries before LLM calls."""
+    """Replace bulky chart payloads with concise summaries before LLM calls.
+    Only a ToolMessage carries a sub-agent envelope; every other message is
+    returned untouched without parsing, since this runs over the whole
+    history before every model call."""
+    if getattr(msg, "type", None) != "tool":
+        return msg
     content = getattr(msg, "content", None)
     compacted = _compact_model_input_content(content)
     if compacted is content:

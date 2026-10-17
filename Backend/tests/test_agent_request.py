@@ -168,9 +168,9 @@ class RenderTaskTests(unittest.TestCase):
     anything on the way.
 
     The fields come first and are the task; the researcher's message follows
-    as context. Live (2026-10-16), with the message first and labeled as the
-    authority, a ground run asked for O3 in New Jersey also queried NO2 across
-    the whole OTC -- the satellite half of the same question."""
+    as context. One question often spans several requests, so a sub-agent
+    told the message wins over its fields is invited to do the parts other
+    agents were sent."""
 
     def test_a_satellite_request_renders_its_fields_then_the_researchers_message_as_context(self):
         from tta_backend.models.agent_request import render_task

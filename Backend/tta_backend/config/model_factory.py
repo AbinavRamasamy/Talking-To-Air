@@ -80,7 +80,6 @@ def _gemini_chat_class() -> Any:
     from langchain_google_genai import ChatGoogleGenerativeAI
     from langchain_google_genai._function_utils import (
         convert_to_genai_function_declarations,
-        tool_to_dict,
     )
 
     class GeminiChat(ChatGoogleGenerativeAI):
@@ -95,16 +94,20 @@ def _gemini_chat_class() -> Any:
             native = [t for t in tools if _native_schema(t) is not None]
             if not native:
                 return super().bind_tools(tools, tool_config, tool_choice=tool_choice, **kwargs)
-            converted = [t for t in tools if _native_schema(t) is None]
-            formatted: list[Any] = (
-                [tool_to_dict(t) for t in convert_to_genai_function_declarations(converted)] if converted else []
+            converted = convert_to_genai_function_declarations(
+                [t for t in tools if _native_schema(t) is None]
             )
-            formatted.append(types.Tool(function_declarations=[
+            # Every function declaration travels in one Tool, as on the stock
+            # path; only special tools (search, code execution) stay separate.
+            declarations = [fd for t in converted for fd in (t.function_declarations or [])]
+            declarations += [
                 types.FunctionDeclaration(
                     name=t.name, description=t.description, parameters_json_schema=_native_schema(t),
                 )
                 for t in native
-            ]))
+            ]
+            formatted: list[Any] = [t for t in converted if not t.function_declarations]
+            formatted.append(types.Tool(function_declarations=declarations))
             if tool_choice:
                 kwargs["tool_choice"] = tool_choice
             if tool_config:

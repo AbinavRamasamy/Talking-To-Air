@@ -11,6 +11,8 @@ export const INITIAL_WORKFLOW_STATE = {
   label: '',
   detail: null,
   failedStage: null,
+  // The lane label that was running when a laned turn failed.
+  failedLane: null,
   active: false,
   // T64 Phase 4: one row per sub-agent the supervisor runs in parallel,
   // in order of first appearance. Events carrying a `lane` land here.
@@ -61,8 +63,15 @@ export function applyWorkflowEvent(state, event, data) {
       // re-expands later (e.g. a second tool call) has context, but
       // `active: false` is what the strip actually reads to hide itself.
       return { ...state, active: false }
-    case 'error':
+    case 'error': {
+      // On a laned turn the single-strip stage is only the outer heartbeat;
+      // what failed is the lane still running.
+      const running = (state.lanes || []).find(row => !row.done)
+      if (running) {
+        return { ...state, failedStage: running.stage, failedLane: running.label, active: false }
+      }
       return { ...state, failedStage: state.stage, active: false }
+    }
     case 'done':
       return { ...INITIAL_WORKFLOW_STATE }
     default:

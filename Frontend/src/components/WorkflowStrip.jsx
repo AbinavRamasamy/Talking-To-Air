@@ -75,7 +75,10 @@ export default function WorkflowStrip({ workflowStage, startedAt }) {
         display: 'flex', alignItems: 'center', gap: '6px',
         fontSize: '11.5px', color: 'var(--error, #c0392b)', padding: '2px 0',
       }}>
-        <span>Failed at: {STAGE_LABELS[failedStage] || failedStage}</span>
+        <span>
+          Failed at: {workflowStage.failedLane ? `${workflowStage.failedLane} · ` : ''}
+          {STAGE_LABELS[failedStage] || failedStage}
+        </span>
       </div>
     )
   }

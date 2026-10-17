@@ -40,6 +40,29 @@ class AgentHelperTests(unittest.TestCase):
 
         self.assertEqual(compacted, "Here is the result.\n\nCharts generated: chart")
 
+    def test_compaction_leaves_non_tool_messages_alone_without_parsing_them(self):
+        """Only a ToolMessage carries a sub-agent envelope. trim_middleware
+        compacts the whole history before every model call, so parsing every
+        human/AI message is wasted JSON validation that grows with the thread."""
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+        from tta_backend.agents import supervisor_agent
+        from tta_backend.models import AgentResult, ChartPayload, agent_result_to_json
+
+        envelope = agent_result_to_json(AgentResult(text="Plotted.", charts=[ChartPayload(type="heatmap")]))
+        human, answer = HumanMessage(content="plot NO2"), AIMessage(content="NO2 peaked near Newark.")
+
+        with patch.object(supervisor_agent, "parse_dispatch_result", side_effect=AssertionError("parsed")), \
+             patch.object(supervisor_agent, "parse_agent_result", side_effect=AssertionError("parsed")):
+            self.assertIs(supervisor_agent._compact_model_input_message(human), human)
+            self.assertIs(supervisor_agent._compact_model_input_message(answer), answer)
+
+        tool = ToolMessage(content=envelope, tool_call_id="c1", name="dispatch")
+        self.assertEqual(
+            supervisor_agent._compact_model_input_message(tool).content,
+            "Plotted.\n\nCharts generated: heatmap",
+        )
+
     def test_compact_model_input_reduces_a_dispatch_batch_to_per_item_text_without_grids(self):
         """T64 D12: a batch is not an AgentResult, so without its own branch
         it would reach the supervisor model as raw JSON, chart grids and all."""

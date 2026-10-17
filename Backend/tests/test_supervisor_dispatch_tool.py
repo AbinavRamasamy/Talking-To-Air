@@ -156,6 +156,38 @@ class SupervisorDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(satellite.allowed, {"visualize": False, "compare": True})
         self.assertTrue(ground_validation_allowed())
 
+    async def test_sibling_dispatch_calls_save_their_context_one_at_a_time(self):
+        from tta_backend.agents import supervisor_agent
+        from tta_backend.services import subagent_dispatch
+        from tta_backend.utils.streaming import _current_thread_id
+
+        tools = await self._tools(FakeGroundAgent(), FakeSatelliteAgent())
+        active, peak = [0], [0]
+
+        async def slow_persist(*args, **kwargs):
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+            await asyncio.sleep(0.5)
+            active[0] -= 1
+
+        token = _current_thread_id.set("thread-1")
+        try:
+            with patch.object(subagent_dispatch, "get_satellite_context", AsyncMock(return_value={})), \
+                 patch.object(subagent_dispatch, "get_ground_monitor_context", AsyncMock(return_value={})), \
+                 patch.object(supervisor_agent, "persist_dispatch_contexts", side_effect=slow_persist):
+                await asyncio.gather(
+                    tools["dispatch"].ainvoke({"requests": [
+                        {"agent": "satellite", "intent": "visualize", "variable": "ozone", "location": "the OTC"},
+                    ]}),
+                    tools["dispatch"].ainvoke({"requests": [
+                        {"agent": "ground", "intent": "nearest_monitor", "pollutant": "NO2", "location": "Camden"},
+                    ]}),
+                )
+        finally:
+            _current_thread_id.reset(token)
+
+        self.assertEqual(peak[0], 1)
+
     async def test_an_invalid_dispatch_goes_back_to_the_model_as_an_error_and_runs_nothing(self):
         """Seven requests, one over the schema cap: the turn must not crash,
         and the model must be told why so it can resend a valid call."""
@@ -183,3 +215,50 @@ class SupervisorDispatchToolTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RepeatingDispatchModel:
+    """Sends the same dispatch every time it may call tools; answers when the
+    supervisor takes tools away (tool_choice "none")."""
+
+    def __init__(self):
+        self.tool_choices = []
+
+    def bind_tools(self, tools, **kwargs):
+        self.tool_choices.append(kwargs.get("tool_choice"))
+        return self
+
+    async def ainvoke(self, *args, **kwargs):
+        from langchain_core.messages import AIMessage
+
+        if self.tool_choices[-1] == "none":
+            return AIMessage(content="Ozone peaked over Philadelphia.")
+        return AIMessage(content="", tool_calls=[{"name": "dispatch", "id": f"call-{len(self.tool_choices)}", "args": {
+            "requests": [{"agent": "satellite", "intent": "visualize", "variable": "ozone", "location": "the OTC"}],
+        }}])
+
+
+@unittest.skipIf(importlib.util.find_spec("langchain") is None, "langchain is not installed")
+class DispatchClosesTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_model_repeating_a_dispatch_loses_the_tool_and_answers(self):
+        """A repeat runs nothing and changes nothing; without closing the tool
+        the model loops until the recursion limit and the turn errors."""
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        from tta_backend.agents import supervisor_agent
+        from tta_backend.models import AgentResult
+        from tta_backend.utils.streaming import stream_response
+
+        model = RepeatingDispatchModel()
+        with patch.object(supervisor_agent, "build_chat_model", return_value=model), \
+             patch.object(supervisor_agent, "get_checkpointer", AsyncMock(return_value=InMemorySaver())):
+            supervisor = await supervisor_agent.build_agent(ground_agent=object(), satellite_agent=object())
+
+        run_satellite = AsyncMock(return_value=AgentResult(text="Mapped ozone."))
+        with patch.object(supervisor_agent, "run_satellite", run_satellite), \
+             patch.object(supervisor_agent, "persist_dispatch_contexts", AsyncMock()):
+            events = [e async for e in stream_response(supervisor, "ozone over the OTC", "thread-1")]
+
+        self.assertEqual(run_satellite.await_count, 1)
+        self.assertEqual(model.tool_choices, [None, None, "none"])
+        self.assertIn("Ozone peaked over Philadelphia.", "".join(d for t, d in events if t == "text"))
