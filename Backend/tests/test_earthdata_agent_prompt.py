@@ -299,5 +299,23 @@ class EarthdataAgentPromptPlaceNameTests(unittest.TestCase):
         self.assertIn("never substitute", prompt[step:step + 900])
 
 
+
+class EarthdataAgentPromptGroundToolScopeTests(unittest.TestCase):
+    """T64: the researcher's message rides along as context, so a phrase like
+    "along with ground sensor readings" reaches a visualize task too. The ground
+    tools refuse outside a compare task; the prompt says so, so the agent does
+    not spend a model step finding out."""
+
+    def test_both_ground_tool_routes_are_scoped_to_a_compare_task(self):
+        from tta_backend.config.earthdata_agent_prompt import get_earthdata_agent_prompt
+
+        prompt = " ".join(get_earthdata_agent_prompt().lower().split())
+
+        for tool in ("`validate_against_ground`", "`exceedance_overlay`"):
+            with self.subTest(tool=tool):
+                route = prompt[prompt.index(tool):prompt.index(tool) + 160]
+                self.assertIn("only when the intent is compare", route)
+
+
 if __name__ == "__main__":
     unittest.main()

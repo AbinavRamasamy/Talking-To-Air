@@ -125,7 +125,7 @@ async def _on_earthdata_mcp_ready(tools: dict[str, Any]) -> None:
     current lifespan cycle assigned to app.state.satellite_agent — see
     agents/earthdata_agent.py for why a mutable placeholder, not a reassigned
     reference, is what makes this visible to the supervisor's already-built
-    ask_earthdata_agent tool closure.
+    dispatch tool closure.
 
     In-flight recovery (2026-07-21): the MCP server crash-restarts, killing the
     long-lived session; the manager reconnects and re-fires this hook with a new

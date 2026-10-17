@@ -35,10 +35,24 @@ from tta_backend.services.open_handle import OpenHandleError, open_handle
 from tta_backend.tools.ground_sensor_tools import epa_aqs_tools as aqs
 from tta_backend.utils.geo_utils import find_lat_coord, find_lon_coord
 from tta_backend.utils.plotting import RegionResolver
-from tta_backend.utils.streaming import emit_status
+from tta_backend.utils.streaming import emit_status, ground_validation_allowed
 
 _aggregation_service = AggregationService()
 _resolver = RegionResolver()
+
+
+def _out_of_scope_error() -> str | None:
+    """The refusal these satellite<->ground tools return when the task in
+    progress is not a comparison (T64). Under the supervisor's dispatch,
+    ground data is the supervisor's to request as a ground request, where
+    the dispatch log records it; checked before any data is opened."""
+    if ground_validation_allowed():
+        return None
+    return json.dumps({"error": (
+        "Ground validation is not part of this task: only a satellite request with "
+        "intent compare may query ground monitors. Ground readings are the "
+        "supervisor's to request; answer from the satellite data."
+    )})
 
 
 def _nearest_cell_series(da: xr.DataArray, lat: float, lon: float) -> xr.DataArray:
@@ -261,6 +275,9 @@ def make_validate_against_ground(mcp_tools: dict[str, BaseTool]) -> BaseTool:
             timeseries artifact refs (one per monitor, overlaying the
             satellite and ground series).
         """
+        out_of_scope = _out_of_scope_error()
+        if out_of_scope is not None:
+            return out_of_scope
         try:
             ds = await open_handle(handle, mcp_tools)
             da = _aggregation_service.to_dataarray(ds, handle=handle)
@@ -450,6 +467,9 @@ def make_exceedance_overlay(mcp_tools: dict[str, BaseTool]) -> BaseTool:
             JSON string: per-monitor exceedance dates + satellite series, and
             timeseries artifact refs (one per monitor with an exceedance day).
         """
+        out_of_scope = _out_of_scope_error()
+        if out_of_scope is not None:
+            return out_of_scope
         try:
             ds = await open_handle(handle, mcp_tools)
             da = _aggregation_service.to_dataarray(ds, handle=handle)

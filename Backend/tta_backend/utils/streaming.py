@@ -49,6 +49,12 @@ _variable_choice_emitter: ContextVar[Optional[Callable[[dict[str, Any]], None]]]
 )
 _current_thread_id: ContextVar[Optional[str]] = ContextVar("current_thread_id", default=None)
 _current_user_id: ContextVar[Optional[str]] = ContextVar("current_user_id", default=None)
+_current_user_message: ContextVar[Optional[str]] = ContextVar("current_user_message", default=None)
+_ground_validation_allowed: ContextVar[bool] = ContextVar("ground_validation_allowed", default=True)
+# T64 Phase 4: (lane id, lane label) of the dispatch item whose run is in
+# progress. Narration emitted inside it is tagged with the lane, so parallel
+# sub-agents' statuses can be shown apart. None outside a dispatch.
+_dispatch_lane: ContextVar[Optional[tuple[str, str]]] = ContextVar("dispatch_lane", default=None)
 _call_budget: ContextVar[Optional[dict[str, Any]]] = ContextVar("call_budget", default=None)
 # Per-turn MCP transport-failure circuit breaker state (storm containment,
 # 2026-07-20). A mutable dict {"consecutive": int, "tripped": bool} bound once
@@ -184,6 +190,62 @@ def current_user_id() -> str | None:
     return _current_user_id.get()
 
 
+def current_user_message() -> str | None:
+    """The researcher's message for the active chat turn, exactly as sent.
+    T64 D6: the dispatch layer puts this in front of every sub-agent task, so
+    the researcher's own words reach the sub-agent without the supervisor
+    model writing them."""
+    return _current_user_message.get()
+
+
+@contextmanager
+def user_message_context(message: str) -> Iterator[None]:
+    """Bind ``current_user_message()`` for one chat turn (see
+    ChatStreamService.stream_chat_events)."""
+    token = _current_user_message.set(message)
+    try:
+        yield
+    finally:
+        _current_user_message.reset(token)
+
+
+def ground_validation_allowed() -> bool:
+    """Whether the satellite agent's own ground tools (validate_against_ground,
+    exceedance_overlay) may run for the task in progress. T64: under the
+    supervisor's dispatch, only a satellite request whose intent is compare
+    may; ground data is otherwise the supervisor's to request. True outside a
+    dispatch, so the router fast path keeps every tool."""
+    return _ground_validation_allowed.get()
+
+
+@contextmanager
+def ground_validation_scope(allowed: bool) -> Iterator[None]:
+    """Bind ``ground_validation_allowed()`` for one sub-agent run. Set before
+    the run starts, so every ToolNode gather-Task the run spawns copies it."""
+    token = _ground_validation_allowed.set(allowed)
+    try:
+        yield
+    finally:
+        _ground_validation_allowed.reset(token)
+
+
+@contextmanager
+def dispatch_lane_scope(lane_id: str, label: str) -> Iterator[None]:
+    """Tag every status/job_progress event emitted inside with this lane."""
+    token = _dispatch_lane.set((lane_id, label))
+    try:
+        yield
+    finally:
+        _dispatch_lane.reset(token)
+
+
+def _with_lane(payload: dict[str, Any]) -> dict[str, Any]:
+    lane = _dispatch_lane.get()
+    if lane is None:
+        return payload
+    return {**payload, "lane": lane[0], "lane_label": lane[1]}
+
+
 @contextmanager
 def user_id_context(user_id: str) -> Iterator[None]:
     """Bind ``current_user_id()`` for non-chat endpoints (e.g. the jobs
@@ -277,10 +339,11 @@ async def stream_response(
             payload["stage"] = stage
         if detail is not None:
             payload["detail"] = detail
-        loop.call_soon_threadsafe(queue.put_nowait, ("status", payload))
+        loop.call_soon_threadsafe(queue.put_nowait, ("status", _with_lane(payload)))
 
     def publish_job_progress(data: dict[str, Any]) -> None:
         _touch()
+        data = _with_lane(data)
         if parent_job_progress_emitter:
             parent_job_progress_emitter(data)
         loop.call_soon_threadsafe(queue.put_nowait, ("job_progress", data))

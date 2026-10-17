@@ -4,9 +4,15 @@ import inspect
 import json
 from typing import Any
 
+from tta_backend.models import parse_dispatch_result
 from tta_backend.services.artifact_store import artifact_store
 from tta_backend.services.chart_service import ChartService
+from tta_backend.services.consulted_header import consulted_agents, with_consulted_header
 from tta_backend.utils.message_utils import flatten_text_content
+
+# Working key on an assistant message while history is built: the agents its
+# dispatch results show were consulted. Removed before the message is returned.
+_CONSULTED = "_consulted"
 
 
 class HistoryService:
@@ -51,7 +57,21 @@ class HistoryService:
                 tool_text, charts = tool_outputs[index]
                 chart_payloads = [next(resolved) for _ in charts]
                 await self._attach_tool_output(result, tool_text, chart_payloads, thread_id, user_id)
-        return self._merge_adjacent_assistant_messages(result)
+                assistant = self._last_assistant(result)
+                if assistant is not None:
+                    consulted = assistant.setdefault(_CONSULTED, [])
+                    consulted += [a for a in consulted_agents(tool_text) if a not in consulted]
+        return [self._with_header(msg) for msg in self._merge_adjacent_assistant_messages(result)]
+
+    def _with_header(self, msg: dict[str, Any]) -> dict[str, Any]:
+        """T64 D14: an answer to a dispatch turn opens with the header naming
+        what ran, as it did when it streamed. The checkpoint holds only the
+        model's own text, so the header is derived again here. A turn with no
+        dispatch batch (pre-T64 ask_* turns) keeps the text it was saved with."""
+        consulted = msg.pop(_CONSULTED, None)
+        if consulted:
+            msg["content"] = with_consulted_header(msg["content"], consulted)
+        return msg
 
     def _assistant_message(self, msg: Any) -> dict[str, Any]:
         tool_calls = []
@@ -153,11 +173,22 @@ class HistoryService:
                     prev.setdefault("artifacts", [])
                     if artifact not in prev["artifacts"]:
                         prev["artifacts"].append(artifact)
+                for agent in msg.get(_CONSULTED, []):
+                    consulted = prev.setdefault(_CONSULTED, [])
+                    if agent not in consulted:
+                        consulted.append(agent)
             else:
                 merged.append(msg)
         return merged
 
     def _artifact_refs(self, content: Any) -> list[dict[str, Any]]:
+        batch = parse_dispatch_result(content)
+        if batch is not None:
+            return [
+                ref.model_dump(exclude_none=True)
+                for item in batch.results if item.result is not None
+                for ref in item.result.artifacts
+            ]
         try:
             parsed = json.loads(content) if isinstance(content, str) else content
         except Exception:
@@ -165,7 +196,7 @@ class HistoryService:
         if not isinstance(parsed, dict):
             return []
         # Two formats land in supervisor ToolMessages:
-        #   AgentResult JSON  → key "artifacts"   (ask_ground_sensor_agent return value)
+        #   AgentResult JSON  → key "artifacts"   (pre-T64 ask_* tools, fast-path write-back)
         #   EPA tool results  → key "_artifact_refs" (never stored at supervisor level,
         #                        but kept for safety in case of future tool refactors)
         refs = parsed.get("artifacts") or parsed.get("_artifact_refs") or []

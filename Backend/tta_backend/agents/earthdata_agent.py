@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class LazySatelliteAgent:
     """Boot-time stand-in for the compiled earthdata agent (PRD T17).
 
-    The supervisor's ``ask_earthdata_agent`` tool and the router fast path
+    The supervisor's ``dispatch`` tool and the router fast path
     both close over one long-lived agent reference. Building the real agent
     requires real MCP tools (``build_satellite_tools`` indexes the tool dict
     directly), which aren't necessarily available at boot — so this object is

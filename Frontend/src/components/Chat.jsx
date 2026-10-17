@@ -7,6 +7,7 @@ import rehypeKatex from 'rehype-katex'
 import { starterMessage } from '../utils/starterPrompts'
 import { compareBadgeLabel, isChartComparable, isSelectionFull, slotIndexOf } from '../utils/compareMode'
 import { reachableArtifacts } from '../utils/artifactReachability'
+import { toolStepsTitle } from '../utils/toolSteps'
 import VariableChoicePicker from './VariableChoicePicker'
 import { API_BASE } from '../config.js'
 
@@ -62,7 +63,7 @@ function ToolStep({ tc }) {
   )
 }
 
-/* ── Collapsible "ask_earthdata_agent() · N steps" card ── */
+/* ── Collapsible tool card: "dispatch · N requests" or "N steps" (toolStepsTitle) ── */
 function ToolStepsCard({ toolCalls, error }) {
   const [expanded, setExpanded] = useState(false)
   if (!toolCalls?.length) return null
@@ -80,7 +81,7 @@ function ToolStepsCard({ toolCalls, error }) {
           <path d="M14.5 3.5a4 4 0 0 0-5.4 4.7L3 14.3v3.2h3.2l6.1-6.1a4 4 0 0 0 4.7-5.4l-2.9 2.9-2-2z" strokeLinejoin="round" />
         </svg>
         <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', flex: 1 }}>
-          ask_earthdata_agent() · {error ? 'error' : `${toolCalls.length} step${toolCalls.length === 1 ? '' : 's'}`}
+          {toolStepsTitle(toolCalls, error)}
         </span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
           style={{ color: 'var(--text-muted)', transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .15s' }}>

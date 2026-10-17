@@ -198,6 +198,23 @@ class Settings:
     agent_recursion_limit: int = field(
         default_factory=lambda: max(1, _int_env("AGENT_RECURSION_LIMIT", 40))
     )
+    # T64: per-turn limits on the supervisor's dispatch fan-out. Concurrency
+    # caps how many sub-agents run at once; satellite gets its own lower cap
+    # because it is the memory-heavy path. The request budget counts sub-agent
+    # runs across every dispatch call in a turn, and rounds count the calls
+    # themselves (two allow satellite first, then ground with its findings).
+    supervisor_max_concurrency: int = field(
+        default_factory=lambda: max(1, _int_env("SUPERVISOR_MAX_CONCURRENCY", 4))
+    )
+    supervisor_max_satellite_concurrency: int = field(
+        default_factory=lambda: max(1, _int_env("SUPERVISOR_MAX_SATELLITE_CONCURRENCY", 2))
+    )
+    supervisor_max_requests_per_turn: int = field(
+        default_factory=lambda: max(1, _int_env("SUPERVISOR_MAX_REQUESTS_PER_TURN", 6))
+    )
+    supervisor_max_dispatch_rounds: int = field(
+        default_factory=lambda: max(1, _int_env("SUPERVISOR_MAX_DISPATCH_ROUNDS", 2))
+    )
     retrieval_max_timeseries_days: int = field(
         default_factory=lambda: max(1, _int_env("RETRIEVAL_MAX_TIMESERIES_DAYS", 366))
     )
