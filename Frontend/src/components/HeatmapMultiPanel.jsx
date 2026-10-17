@@ -13,6 +13,8 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import MapLibreHeatmapPanel from './MapLibreHeatmapPanel.jsx'
 import { buildCanvasFallbackFrame } from '../utils/canvasFallback.js'
 import { colorbarGeometry } from '../utils/colorbarGeometry.js'
+import { scaledTicks, scaledUnitsLabel } from '../utils/displayFormat.js'
+import SciText from './SciText.jsx'
 import { resolveThumbnailMode } from '../utils/overlayMode.js'
 import { BORDER_LINE, fetchUsStatesGeoJSON, isConusBounds } from '../utils/regionBorders.js'
 import { thumbnailBorders, thumbnailFrame } from '../utils/thumbnailGeometry.js'
@@ -81,6 +83,8 @@ function ThumbnailColorbar({ legend, compact = false }) {
   const gradientId = `tta-thumb-gradient-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const { gradientStops, ticks } = colorbarGeometry({ vmin: legend.vmin, vmax: legend.vmax, lut: legend.lut, tickCount: compact ? 3 : 5 })
   if (!gradientStops.length) return null
+  const { labels, multiplier } = scaledTicks(ticks.map(tick => tick.value))
+  const unitsLabel = scaledUnitsLabel(multiplier, legend.units)
   const tickStyle = { fontSize: compact ? '9px' : '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }
   return (
     <div style={{ width: '100%', maxWidth: compact ? undefined : '320px' }}>
@@ -93,11 +97,11 @@ function ThumbnailColorbar({ legend, compact = false }) {
         <rect x={0} y={0} width={100} height={10} fill={`url(#${gradientId})`} rx={1} />
       </svg>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
-        {ticks.map((tick, i) => <span key={i} style={tickStyle}>{tick.value.toExponential(1)}</span>)}
+        {labels.map((label, i) => <span key={i} style={tickStyle}>{label}</span>)}
       </div>
-      {(legend.units || legend.clipNote) && (
+      {(unitsLabel || legend.clipNote) && (
         <div style={{ ...tickStyle, fontFamily: 'var(--font)', marginTop: 1, whiteSpace: compact ? 'nowrap' : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {[legend.units, legend.clipNote].filter(Boolean).join(' · ')}
+          <SciText>{[unitsLabel, legend.clipNote].filter(Boolean).join(' · ')}</SciText>
         </div>
       )}
     </div>

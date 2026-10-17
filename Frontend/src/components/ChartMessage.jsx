@@ -14,6 +14,7 @@ import { resolveCsvExport, resolveNetcdfExport } from '../utils/chartExport.js'
 import { buildOverlayTraces } from '../utils/timeseriesCompare.js'
 import { availableAxes, profileLayout, profileTraces, spreadCaveat } from '../utils/verticalProfile.js'
 import { apiFetch } from '../utils/apiFetch.js'
+import { formatUnits, plotlySuperscript } from '../utils/displayFormat.js'
 import { API_BASE } from '../config.js'
 
 // react-plotly.js/factory is CommonJS, so the shape of its default import is
@@ -280,7 +281,7 @@ export function TimeSeriesPanel({ payload }) {
     line:          { color: '#1D9E75', width: 2 },
     marker:        { color: '#1D9E75', size: 5 },
     fill:          'tozeroy', fillcolor: 'rgba(29,158,117,0.08)',
-    hovertemplate: `%{x|%Y-%m-%d %H:%M}<br>${stat}: %{y:.3e} ${units}<extra></extra>`,
+    hovertemplate: `%{x|%Y-%m-%d %H:%M}<br>${stat}: %{y:.3e} ${plotlySuperscript(formatUnits(units))}<extra></extra>`,
   }]
 
   const layout = {
@@ -290,7 +291,7 @@ export function TimeSeriesPanel({ payload }) {
     title:  { text: title, font: { size: 13, weight: 500 }, x: 0.5, xanchor: 'center' },
     height: 300,
     xaxis:  { title: { text: 'Time' }, showgrid: true, gridcolor: 'rgba(0,0,0,0.06)', zeroline: false, tickfont: { size: 10 } },
-    yaxis:  { title: { text: `${stat} (${units})` }, showgrid: true, gridcolor: 'rgba(0,0,0,0.06)', zeroline: false, tickfont: { size: 10 }, exponentformat: 'e' },
+    yaxis:  { title: { text: `${stat} (${plotlySuperscript(formatUnits(units))})` }, showgrid: true, gridcolor: 'rgba(0,0,0,0.06)', zeroline: false, tickfont: { size: 10 }, exponentformat: 'power' },
     datarevision: revision,
   }
 
@@ -391,7 +392,7 @@ export function TimeSeriesOverlayPanel({ series, height = 320 }) {
     title:  { text: 'Comparison', font: { size: 13, weight: 500 }, x: 0.5, xanchor: 'center' },
     height,
     xaxis:  { title: { text: 'Time' }, showgrid: true, gridcolor: 'rgba(0,0,0,0.06)', zeroline: false, tickfont: { size: 10 } },
-    yaxis:  { title: { text: units }, showgrid: true, gridcolor: 'rgba(0,0,0,0.06)', zeroline: false, tickfont: { size: 10 }, exponentformat: 'e' },
+    yaxis:  { title: { text: plotlySuperscript(formatUnits(units)) }, showgrid: true, gridcolor: 'rgba(0,0,0,0.06)', zeroline: false, tickfont: { size: 10 }, exponentformat: 'power' },
     showlegend: true,
     legend: { orientation: 'h', y: -0.25 },
     datarevision: revision,

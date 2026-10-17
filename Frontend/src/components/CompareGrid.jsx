@@ -23,6 +23,8 @@ import MapLibreHeatmapPanel from './MapLibreHeatmapPanel.jsx'
 import { TimeSeriesPanel, TimeSeriesOverlayPanel } from './ChartMessage.jsx'
 import { MetadataOverview } from './MetadataOverview.jsx'
 import { colorbarGeometry } from '../utils/colorbarGeometry.js'
+import { scaledTicks, scaledUnitsLabel } from '../utils/displayFormat.js'
+import SciText from './SciText.jsx'
 import { computeSharedColorScale } from '../utils/sharedColorScale.js'
 import { filledCharts, activeCompareKind } from '../utils/compareMode.js'
 import { timeseriesOverlayCompatible, toOverlaySeries } from '../utils/timeseriesCompare.js'
@@ -32,6 +34,8 @@ function SharedLegend({ vmin, vmax, colormap, units }) {
   const { gradientStops, ticks } = colorbarGeometry({ vmin, vmax, lut: colormap?.lut, tickCount: 5 })
   if (!gradientStops.length) return null
   const gradientId = 'tta-compare-shared-gradient'
+  const { labels, multiplier } = scaledTicks(ticks.map(tick => tick.value))
+  const unitsLabel = scaledUnitsLabel(multiplier, units)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
       <svg width={200} height={14} style={{ display: 'block', flexShrink: 0 }}>
@@ -45,9 +49,9 @@ function SharedLegend({ vmin, vmax, colormap, units }) {
         <rect x={0} y={0} width={200} height={14} fill={`url(#${gradientId})`} rx={2} />
       </svg>
       <div style={{ display: 'flex', justifyContent: 'space-between', width: 200, fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-        {ticks.map((tick, i) => <span key={i}>{tick.value.toExponential(1)}</span>)}
+        {labels.map((label, i) => <span key={i}>{label}</span>)}
       </div>
-      {units && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{units}</span>}
+      {unitsLabel && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}><SciText>{unitsLabel}</SciText></span>}
     </div>
   )
 }
