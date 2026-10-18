@@ -6,7 +6,7 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { starterMessage } from '../utils/starterPrompts'
 import CardPreview from './CardPreview.jsx'
-import { compactDate } from '../utils/displayFormat.js'
+import { compactDateRange } from '../utils/displayFormat.js'
 import { compareBadgeLabel, isChartComparable, isSelectionFull, slotIndexOf } from '../utils/compareMode'
 import { reachableArtifacts } from '../utils/artifactReachability'
 import { toolStepsTitle } from '../utils/toolSteps'
@@ -19,7 +19,7 @@ function outputLabel(item) {
   if (item.kind === 'chart') {
     const chart = item.data
     const p = chart.provenance || {}
-    const dateRange = [compactDate(p.start_date), compactDate(p.end_date)].filter(Boolean).join(' – ')
+    const dateRange = compactDateRange(p.start_date, p.end_date)
     return {
       title: chart.title || p.variable || chart.variable || 'Output',
       subtitle: [p.region_name, dateRange].filter(Boolean).join(' · '),

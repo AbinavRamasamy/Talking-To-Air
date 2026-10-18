@@ -57,6 +57,14 @@ export function profilePath(values, axis, { width, height, pad, reversed = false
     .join(' ')
 }
 
+// The card draws at 48px; 96 keeps it sharp on a high-density screen. The
+// server scales the overlay down rather than sending it full size.
+const THUMBNAIL_SIDE = 96
+
+function withThumbnailSize(url) {
+  return `${url}${url.includes('?') ? '&' : '?'}thumb=${THUMBNAIL_SIDE}`
+}
+
 const CHART_ICON = { heatmap: 'map', heatmap_multi: 'map', timeseries: 'timeseries', profile: 'profile' }
 const ARTIFACT_ICON = { map: 'map', comparison: 'map', timeseries: 'timeseries', table: 'table' }
 
@@ -64,7 +72,7 @@ function chartPreview(chart) {
   const icon = { kind: 'icon', icon: CHART_ICON[chart.type] || 'generic' }
   if (chart.type === 'heatmap' || chart.type === 'heatmap_multi') {
     const overlayUrl = chart.overlay?.url || chart.panels?.find(panel => panel?.overlay?.url)?.overlay.url
-    return overlayUrl ? { kind: 'map', overlayUrl } : icon
+    return overlayUrl ? { kind: 'map', overlayUrl: withThumbnailSize(overlayUrl) } : icon
   }
   const values = Array.isArray(chart.values) ? chart.values : []
   if (values.filter(isNum).length < 2) return icon

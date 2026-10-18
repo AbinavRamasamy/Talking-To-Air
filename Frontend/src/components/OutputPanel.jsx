@@ -21,7 +21,7 @@ import { MetaField } from './metadataPrimitives.jsx'
 import { smallButtonStyle, copyToClipboard } from '../utils/metadataUiHelpers.js'
 import { resolveMasking, resolveRegionFidelity, formatQaPassRate, regionTypeNote, regionOriginNote } from '../utils/maskingProvenance'
 import { evidenceRows } from '../utils/evidenceSummary'
-import { compactDate, formatStatValue, formatUnits } from '../utils/displayFormat.js'
+import { compactDateRange, formatStatValue, formatUnits } from '../utils/displayFormat.js'
 import SciText from './SciText.jsx'
 import { filledCharts } from '../utils/compareMode'
 import { focusChartPayload } from '../utils/compareSlotOverview'
@@ -68,7 +68,7 @@ function chartMetaChips(chart) {
   if (p.dataset) chips.push(p.dataset)
   const units = chart.units || p.units
   if (units) chips.push(formatUnits(units))
-  const dateRange = [compactDate(p.start_date), compactDate(p.end_date)].filter(Boolean).join(' → ')
+  const dateRange = compactDateRange(p.start_date, p.end_date, ' → ')
   if (dateRange) chips.push(dateRange)
   if (p.region_name) chips.push(p.region_name)
   return chips

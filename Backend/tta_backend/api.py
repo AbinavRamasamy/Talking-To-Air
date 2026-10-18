@@ -1066,7 +1066,12 @@ def _chart_overlay_path(payload: dict[str, Any], panel: int | None) -> str | Non
 
 @app.get("/chart/{chart_id}/overlay.png")
 @limiter.limit("120/minute")
-async def chart_overlay_png(chart_id: str, request: Request, panel: int | None = None) -> Response:
+async def chart_overlay_png(
+    chart_id: str,
+    request: Request,
+    panel: int | None = None,
+    thumb: int | None = Query(default=None, ge=16, le=256),
+) -> Response:
     payload = await _get_owned_chart(chart_id, request.state.current_user.id)
     overlay_path = _chart_overlay_path(payload, panel)
     # A 404 covers both a chart that never had an overlay and one whose overlay
@@ -1077,6 +1082,8 @@ async def chart_overlay_png(chart_id: str, request: Request, panel: int | None =
         content = await asyncio.to_thread(overlay_store.read_overlay, overlay_path)
     if content is None:
         raise HTTPException(status_code=404, detail="This chart has no rendered overlay.")
+    if thumb is not None:
+        content = await asyncio.to_thread(overlay_store.thumbnail_png, content, thumb)
     return Response(content=content, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
