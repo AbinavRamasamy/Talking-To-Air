@@ -49,6 +49,14 @@ def resolve(variable: str | None, *, diverging: bool = False) -> ColormapResolut
     return _resolve_named(name)
 
 
+def by_name(name: str) -> ColormapResolution | None:
+    """A colormap this module hands out, looked up by the name a payload
+    records. None for any other name, so a request can't pick an arbitrary
+    matplotlib colormap."""
+    known = {*_SEQUENTIAL_COLORMAPS.values(), _DEFAULT_SEQUENTIAL, _DIVERGING_COLORMAP}
+    return _resolve_named(name) if name in known else None
+
+
 def _resolve_named(name: str) -> ColormapResolution:
     cmap = mpl.colormaps[name]
     samples = cmap(np.linspace(0.0, 1.0, _LUT_SAMPLES))

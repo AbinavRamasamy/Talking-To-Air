@@ -1,7 +1,8 @@
 """
 services/overlay_store.py
 =========================
-Where server-rendered map-overlay PNGs live.
+Where server-rendered map-overlay PNGs live, and the 16-bit value rasters
+they were drawn from.
 
 Overlays are served only through the authenticated ``/chart/{id}/overlay.png``
 route, so the store sits outside the public output directory. Each entry is
@@ -82,14 +83,16 @@ def read_overlay(stored_path: str) -> bytes | None:
 
 
 def chart_overlay_paths(payload: dict[str, Any]) -> list[str]:
-    """Every overlay path a chart payload records: a map's own overlay, or a
-    comparison's panels and difference panel."""
+    """Every store entry a chart payload records: a map's own overlay, or a
+    comparison's panels and difference panel, each with its value raster."""
     holders: list[Any] = [payload.get("overlay")]
     if payload.get("type") == "heatmap_multi":
         holders += [panel.get("overlay") for panel in payload.get("panels") or [] if isinstance(panel, dict)]
         difference = payload.get("difference")
         if isinstance(difference, dict):
             holders.append(difference.get("overlay"))
+    overlays = [h for h in holders if isinstance(h, dict)]
+    holders = overlays + [h.get("_values") for h in overlays]
     return [h["_path"] for h in holders if isinstance(h, dict) and h.get("_path")]
 
 

@@ -78,7 +78,7 @@ from tta_backend.services.open_handle import (
 )
 from tta_backend.utils.geo_utils import find_lat_coord, find_lon_coord, vertical_axis_kind
 from tta_backend.utils.colormaps import resolve as resolve_colormap
-from tta_backend.utils.overlay_render import render_overlay_png
+from tta_backend.utils.overlay_render import render_overlay
 from tta_backend.utils import xarray_ops
 from tta_backend.utils.phase_timing import phase_timer
 from tta_backend.utils.plotting import (
@@ -265,21 +265,35 @@ def _area_weighted_mean(arr: np.ndarray, lats: np.ndarray, finite: np.ndarray) -
     return float((contribution * weights).sum() / total)
 
 
-def _render_and_store_overlay(lats: np.ndarray, lons: np.ndarray, arr: np.ndarray, lut: list[Any], vmin: float, vmax: float) -> str | None:
-    """Render the full-native-resolution overlay PNG and persist it to the
-    overlay store. Returns the stored path, or None on failure -- a
-    failed render must degrade the chart (no overlay.url; the frontend
-    falls back to canvas-from-arrays), never fail the whole tool call.
+def _render_and_store_overlay(lats: np.ndarray, lons: np.ndarray, arr: np.ndarray, lut: list[Any], vmin: float, vmax: float) -> dict[str, Any]:
+    """Render the full-native-resolution overlay PNG and persist it, with the
+    value raster it was drawn from, to the overlay store. Returns the overlay
+    fields to record: ``_path`` for the PNG and ``_values`` (``_path``, ``lo``,
+    ``hi``) for the raster the route recolors at a requested scale.
+
+    Returns ``{}`` on failure -- a failed render must degrade the chart (no
+    overlay.url; the frontend falls back to canvas-from-arrays), never fail
+    the whole tool call. A raster that fails to store only drops ``_values``:
+    the chart keeps its overlay and loses the full-resolution recolor.
 
     The store creates its directory on first write and evicts older overlays
     to stay under its byte cap (services/overlay_store.py). A failed write
     degrades exactly like a failed render."""
     try:
-        png_bytes = render_overlay_png(lats, lons, arr, lut, vmin, vmax)
-        return overlay_store.write_overlay(png_bytes)
+        rendered = render_overlay(lats, lons, arr, lut, vmin, vmax)
+        fields: dict[str, Any] = {"_path": overlay_store.write_overlay(rendered.png)}
     except Exception:
         logger.warning("overlay_render_failed", exc_info=True)
-        return None
+        return {}
+    raster = rendered.value_raster
+    if raster is not None:
+        try:
+            raster_path = overlay_store.write_overlay(raster.png)
+        except Exception:
+            logger.warning("overlay_value_raster_store_failed", exc_info=True)
+        else:
+            fields["_values"] = {"_path": raster_path, "lo": raster.lo, "hi": raster.hi}
+    return fields
 
 
 def _da_to_heatmap_payload(
@@ -358,7 +372,7 @@ def _build_heatmap_payload(
     # Full-native-resolution extent, captured before downsampling, for the
     # server-rendered overlay PNG (T23) — visual fidelity and interaction
     # resolution are deliberately decoupled. The bounds are pixel-EDGE, not
-    # pixel-center: render_overlay_png rasterizes edge-to-edge (left =
+    # pixel-center: render_overlay rasterizes edge-to-edge (left =
     # lons[0] - res/2, …), so reporting center min/max here would pin an
     # edge-to-edge PNG onto center-to-center bounds and misregister every
     # pixel by up to half a cell (visible on coarse grids like GPM/MERRA-2).
@@ -377,9 +391,7 @@ def _build_heatmap_payload(
         # below thins lats_out/lons_out/arr for the JSON payload -- visual
         # fidelity (PNG) is deliberately decoupled from interaction resolution
         # (arrays).
-        overlay_path = _render_and_store_overlay(lats_out, lons_out, arr, colormap.lut, vmin, vmax)
-        if overlay_path is not None:
-            overlay["_path"] = overlay_path
+        overlay.update(_render_and_store_overlay(lats_out, lons_out, arr, colormap.lut, vmin, vmax))
 
     statistics = _field_statistics(arr, lats_out)
 
@@ -534,6 +546,10 @@ def _scrubbable_statistics(frames: dict[str, Any]) -> list[str]:
 def _wire_overlay_url(overlay: dict[str, Any] | None, url: str) -> None:
     if isinstance(overlay, dict) and overlay.get("_path"):
         overlay["url"] = url
+        # The same url takes ?vmin=&vmax=&cmap= to recolor the stored value
+        # raster; a chart drawn before the raster existed has none.
+        if isinstance(overlay.get("_values"), dict) and overlay["_values"].get("_path"):
+            overlay["rescalable"] = True
 
 
 def _wire_overlay_urls(payload: dict[str, Any]) -> None:

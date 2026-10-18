@@ -180,16 +180,18 @@ class OverlayStoreIsolationTests(StoreStateAssertions):
         lons = np.linspace(-100.0, -96.0, 10)
         values = np.linspace(0.0, 1.0, lats.size * lons.size).reshape(lats.size, lons.size)
 
-        path = plot_tools._render_and_store_overlay(
+        fields = plot_tools._render_and_store_overlay(
             lats, lons, values, resolve("NO2").lut, 0.0, 1.0
         )
 
-        self.assertIsNotNone(path, "the overlay render failed, so this proves nothing")
-        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
-        self.assertTrue(os.path.isfile(path))
-        self.assertFalse(
-            _is_inside(path, APP_ROOT), f"a stored overlay landed at {path!r}, in the checkout"
-        )
+        self.assertIn("_path", fields, "the overlay render failed, so this proves nothing")
+        self.assertIn("_values", fields, "the value raster was not stored, so this proves half")
+        for path in (fields["_path"], fields["_values"]["_path"]):
+            self.addCleanup(lambda path=path: os.path.exists(path) and os.remove(path))
+            self.assertTrue(os.path.isfile(path))
+            self.assertFalse(
+                _is_inside(path, APP_ROOT), f"a stored overlay landed at {path!r}, in the checkout"
+            )
         self.assertUntouched(CHECKOUT_OVERLAY_STORE)
 
     def test_the_deployment_path_survives_the_isolation(self) -> None:

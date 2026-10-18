@@ -23,7 +23,7 @@
  * the arrays; basemap/terrain tiles failed -> flat fill, overlay still
  * shows.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 // maplibre-gl 6 is ESM-only with no default export.
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -38,7 +38,7 @@ import { scaledTicks, scaledUnitsLabel } from '../utils/displayFormat.js'
 import SciText from './SciText.jsx'
 import { buildCanvasFallbackFrame } from '../utils/canvasFallback.js'
 import { BORDER_LINE, fetchUsStatesGeoJSON, isConusBounds, overlayBeforeId } from '../utils/regionBorders.js'
-import { resolveOverlayMode } from '../utils/overlayMode.js'
+import { rescaledOverlayUrl, resolveOverlayMode } from '../utils/overlayMode.js'
 import { currentAccessToken } from '../utils/apiFetch.js'
 import { API_BASE } from '../config.js'
 
@@ -203,10 +203,11 @@ export default function MapLibreHeatmapPanel({ payload, height = 420, colorScale
 
   // An externally supplied vmin/vmax/colormap wins over the payload's own --
   // this is the hook compare mode's shared-scale logic (T28) uses to recolor
-  // every panel onto one range. The server-rendered overlay PNG is baked
-  // with the payload's native scale and can't be recolored client-side, so
-  // an override always forces the canvas-fallback path (rendered from the
-  // payload's own lats/lons/values arrays).
+  // every panel onto one range. The overlay PNG is baked at the payload's
+  // native scale, so an override asks the overlay route to recolor the value
+  // raster it stored beside it, at full resolution. A chart drawn before those
+  // rasters existed, or whose raster was evicted, falls back to the canvas
+  // built from the payload's thinned lats/lons/values arrays.
   const effectiveVmin = colorScaleOverride?.vmin ?? vmin
   const effectiveVmax = colorScaleOverride?.vmax ?? vmax
   const effectiveColormap = colorScaleOverride?.colormap ?? colormap
@@ -242,22 +243,31 @@ export default function MapLibreHeatmapPanel({ payload, height = 420, colorScale
     let basemapFailed = false
     let terrainFailed = false
 
+    // The url the 'overlay' image source was built with, so a scale change
+    // swaps the image and an unchanged one leaves it alone.
+    let imageUrl = null
+
     // Renders the data overlay using whatever scale is current at call
-    // time (overrideRef, not the closed-over prop) -- either the server PNG
-    // (native scale, no override active) or a canvas frame built from the
-    // payload's arrays at the effective vmin/vmax/colormap.
+    // time (overrideRef, not the closed-over prop) -- the server PNG at its
+    // native scale, the server PNG recolored at the override's scale, or a
+    // canvas frame built from the payload's arrays at the effective
+    // vmin/vmax/colormap.
     const drawOverlay = (map) => {
       const override = overrideRef.current
       const activeFrame = frameRef.current
-      if (resolveOverlayMode(override, overlay?.url, activeFrame) === 'native') {
+      const mode = resolveOverlayMode(override, overlay?.url, activeFrame, overlay?.rescalable)
+      if (mode !== 'canvas') {
+        const url = `${API_BASE}${mode === 'native' ? overlay.url : rescaledOverlayUrl(overlay.url, override)}`
         if (map.getLayer('overlay')) map.removeLayer('overlay')
         if (map.getSource('overlay-canvas')) map.removeSource('overlay-canvas')
+        if (map.getSource('overlay') && imageUrl !== url) map.removeSource('overlay')
         if (!map.getSource('overlay')) {
           map.addSource('overlay', {
             type: 'image',
-            url: `${API_BASE}${overlay.url}`,
+            url,
             coordinates: overlayCornersFromBounds(overlay.bounds || bounds),
           })
+          imageUrl = url
         }
         if (!map.getLayer('overlay')) {
           map.addLayer({
@@ -394,14 +404,17 @@ export default function MapLibreHeatmapPanel({ payload, height = 420, colorScale
 }
 
 // The legend sits in its own strip under the map rather than over it, where
-// the basemap attribution covered it and the text had to stay tiny.
-function MapColorbar({ gradientStops, ticks, units, clipNote }) {
+// the basemap attribution covered it and the text had to stay tiny. Compare
+// mode also draws it once above the grid for a shared scale. The gradient id
+// is per instance: several colorbars share a page in compare mode, and a
+// fixed id made every one of them paint the first one's colormap.
+export function MapColorbar({ gradientStops, ticks, units, clipNote, marginTop = 10 }) {
+  const gradientId = `tta-colorbar-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   if (!gradientStops.length) return null
-  const gradientId = 'tta-colorbar-gradient'
   const { labels, multiplier } = scaledTicks(ticks.map(tick => tick.value))
   const unitsLabel = scaledUnitsLabel(multiplier, units)
   return (
-    <div style={{ marginTop: '10px', maxWidth: '440px', flexShrink: 0 }}>
+    <div style={{ marginTop, maxWidth: '440px', flexShrink: 0 }}>
       <svg viewBox="0 0 100 10" preserveAspectRatio="none" style={{ display: 'block', width: '100%', height: 14 }}>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">

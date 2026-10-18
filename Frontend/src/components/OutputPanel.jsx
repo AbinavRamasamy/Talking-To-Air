@@ -58,6 +58,43 @@ const panelRootStyle = {
 // not, because it centres its content rather than scrolling it.
 const panelRootClipped = { ...panelRootStyle, overflow: 'hidden' }
 
+const SINGLE_MAP_MAX_HEIGHT = 560
+const SINGLE_MAP_MIN_HEIGHT = 320
+
+// The single map, sized to the visible height of the scroll pane it sits in so
+// the map, its title and its colorbar fit on a laptop screen without scrolling.
+// Capped at the old fixed height so taller screens look the same. It mounts
+// only once measured, so maplibre is built at its real size.
+function FittedSingleMap(props) {
+  const ref = useRef(null)
+  const [height, setHeight] = useState(null)
+  useEffect(() => {
+    const wrapper = ref.current
+    const pane = wrapper?.parentElement
+    if (!pane) return undefined
+    const measure = () => {
+      const style = getComputedStyle(pane)
+      const visible = pane.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+      // `height` sizes the map and colorbar only; the panel's title sits on
+      // top of it and wraps with the width, so take off whatever the last
+      // render drew beyond `height`.
+      setHeight((prev) => {
+        const extra = prev === null ? 0 : wrapper.offsetHeight - prev
+        return Math.floor(Math.min(SINGLE_MAP_MAX_HEIGHT, Math.max(SINGLE_MAP_MIN_HEIGHT, visible - extra)))
+      })
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(pane)
+    observer.observe(wrapper)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div ref={ref} style={{ flexShrink: 0 }}>
+      {height !== null && <MapLibreHeatmapPanel {...props} height={height} />}
+    </div>
+  )
+}
+
 function chartTitle(chart) {
   return chart.title || chart.provenance?.variable || chart.variable || 'Output'
 }
@@ -1058,9 +1095,8 @@ export default function OutputPanel({
       <div ref={plotRootRef} style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
         {activeTab === 'map' && chart.type === 'heatmap' && (
           <>
-            <MapLibreHeatmapPanel
+            <FittedSingleMap
               payload={chart}
-              height={560}
               colorScaleOverride={scrubScale}
               frame={activeFrame}
             />
