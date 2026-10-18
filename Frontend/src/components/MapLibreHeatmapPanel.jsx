@@ -23,7 +23,7 @@
  * the arrays; basemap/terrain tiles failed -> flat fill, overlay still
  * shows.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 // maplibre-gl 6 is ESM-only with no default export.
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -394,14 +394,17 @@ export default function MapLibreHeatmapPanel({ payload, height = 420, colorScale
 }
 
 // The legend sits in its own strip under the map rather than over it, where
-// the basemap attribution covered it and the text had to stay tiny.
-function MapColorbar({ gradientStops, ticks, units, clipNote }) {
+// the basemap attribution covered it and the text had to stay tiny. Compare
+// mode also draws it once above the grid for a shared scale. The gradient id
+// is per instance: several colorbars share a page in compare mode, and a
+// fixed id made every one of them paint the first one's colormap.
+export function MapColorbar({ gradientStops, ticks, units, clipNote, marginTop = 10 }) {
+  const gradientId = `tta-colorbar-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   if (!gradientStops.length) return null
-  const gradientId = 'tta-colorbar-gradient'
   const { labels, multiplier } = scaledTicks(ticks.map(tick => tick.value))
   const unitsLabel = scaledUnitsLabel(multiplier, units)
   return (
-    <div style={{ marginTop: '10px', maxWidth: '440px', flexShrink: 0 }}>
+    <div style={{ marginTop, maxWidth: '440px', flexShrink: 0 }}>
       <svg viewBox="0 0 100 10" preserveAspectRatio="none" style={{ display: 'block', width: '100%', height: 14 }}>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
