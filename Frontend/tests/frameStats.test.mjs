@@ -68,7 +68,6 @@ test('an interval reports its own numbers, measured before the block mean', () =
   // would report a sparse hour as almost fully covered.
   assert.equal(stats.validPct, 34.44)
   assert.equal(stats.basis, 'analyzed-region')
-  assert.equal(stats.validBasis, 'region')
   assert.equal(stats.qaPassRate, 0.3505)
 })
 

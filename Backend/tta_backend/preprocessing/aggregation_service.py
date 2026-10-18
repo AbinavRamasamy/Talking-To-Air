@@ -1373,14 +1373,9 @@ class AggregationService:
     ) -> dict[str, Any]:
         time_dim = time_dim or identify_time(data)
         times = []
-        # Every granule retrieved, against ``n_granules`` -- the ones that
-        # contributed a value. The QA pass rate is counted over all of them,
-        # so the metadata states both or the two counts read as a contradiction.
-        n_retrieved = n_granules
         if time_dim and time_dim in getattr(data, "coords", {}):
             all_times = [str(t) for t in np.atleast_1d(data[time_dim].values)]
             times = [all_times[i] for i in valid_indices if i < len(all_times)]
-            n_retrieved = max(n_granules, len(all_times))
 
         start = self._date_only(times[0]) if times else ""
         end = self._date_only(times[-1]) if times else ""
@@ -1400,13 +1395,10 @@ class AggregationService:
         # An unknown cadence is disclosed as plain "granules" — never dressed
         # up as a frequency word the data never claimed.
         cadence_label = {"hourly": "hourly", "daily": "daily", "monthly": "monthly"}.get(cadence, cadence)
-        granule_noun = "granule" if cadence == "unknown" else f"{cadence_label} granule"
-        granule_str = f"{n_granules} {granule_noun}{'s' if n_granules != 1 else ''}"
-        # The long form says how many were retrieved and held nothing here.
-        used_of_retrieved = (
-            f"{n_granules} of {n_retrieved} {granule_noun}s with data"
-            if n_retrieved > n_granules else granule_str
-        )
+        if cadence == "unknown":
+            granule_str = f"{n_granules} granule{'s' if n_granules != 1 else ''}"
+        else:
+            granule_str = f"{n_granules} {cadence_label} granule{'s' if n_granules != 1 else ''}"
 
         # A frequency period word ("Annual"/"Daily") is inferred from the
         # granule *count*, but the count only implies a span under the assumed
@@ -1429,7 +1421,7 @@ class AggregationService:
         stat_label = stat.capitalize()
         date_range = f"{start} to {end}" if start and end and start != end else (start or end)
         year_label = start[:4] if start[:4] and start[:4] == end[:4] else date_range
-        aggregation_label = f"{period} {stat_label}, {used_of_retrieved}"
+        aggregation_label = f"{period} {stat_label}, {granule_str}"
         if date_range:
             aggregation_label = f"{aggregation_label}, {date_range}"
 
@@ -1444,7 +1436,6 @@ class AggregationService:
             "start_date": start,
             "end_date": end,
             "n_granules": int(n_granules),
-            "n_granules_retrieved": int(n_retrieved),
             "cadence": cadence,
             "stat": stat,
         }

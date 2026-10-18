@@ -34,21 +34,7 @@ function statsFromPayload(payload) {
     basis: 'analyzed-region',
     count: s.count,
     validPct: Number.isFinite(s.valid_fraction) ? s.valid_fraction * 100 : 0,
-    // 'region': a share of the region's own area. A payload saved before the
-    // backend sent this divided by the bounding-box grid instead.
-    validBasis: s.valid_basis === 'region' ? 'region' : 'grid',
   }
-}
-
-// What the "Valid values" percentage is a share of, stated under it.
-export function validValuesNote(stats) {
-  if (stats?.basis === 'analyzed-region') {
-    return stats.validBasis === 'region'
-      ? "of the region's area has data"
-      : 'of grid cells have data, including cells outside the region'
-  }
-  if (stats?.basis === 'series') return 'time steps carrying a value'
-  return 'finite cells in the rendered grid'
 }
 
 // Every cell of the payload's own grid, nulls included. Masked pixels (QA

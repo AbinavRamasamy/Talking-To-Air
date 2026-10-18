@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { computeChartStats, validValuesNote } from '../src/utils/chartStats.js'
+import { computeChartStats } from '../src/utils/chartStats.js'
 
 // Backend heatmap payloads serialize masked pixels (QA-flag drops, fill
 // values, out-of-region cells) as null in the 2D `values` grid
@@ -151,27 +151,4 @@ test('fully valid grid still reports 100%', () => {
   }
   const stats = computeChartStats(chart)
   assert.equal(stats.validPct, 100)
-})
-
-// "Valid values" was a share of the bounding-box grid, so a complete retrieval
-// over the Ozone Transport Region read 40.5%: the Atlantic counted as missing.
-// The backend now divides by the region's own area and says so; a chart saved
-// before that still carries the grid figure and must be labelled as one.
-test('the valid-values note says what the percentage is a share of', () => {
-  const base = { type: 'heatmap', units: '', lats: [10], lons: [20, 21], values: [[1.0, 2.0]] }
-  const region = computeChartStats({
-    ...base, statistics: { count: 40, valid_fraction: 0.96, valid_basis: 'region', mean: 1.5, min: 1, max: 2 },
-  })
-  assert.equal(validValuesNote(region), "of the region's area has data")
-
-  const legacy = computeChartStats({
-    ...base, statistics: { count: 40, valid_fraction: 0.405, mean: 1.5, min: 1, max: 2 },
-  })
-  assert.equal(validValuesNote(legacy), 'of grid cells have data, including cells outside the region')
-
-  assert.equal(validValuesNote(computeChartStats(base)), 'finite cells in the rendered grid')
-  assert.equal(
-    validValuesNote(computeChartStats({ type: 'timeseries', units: '', values: [1, null] })),
-    'time steps carrying a value',
-  )
 })
