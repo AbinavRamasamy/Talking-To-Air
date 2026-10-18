@@ -395,3 +395,17 @@ test('an unstated maturity discloses nothing rather than reassuring', () => {
   assert.equal(maturityFields({ provenance: {} }), null)
   assert.equal(maturityFields(null), null)
 })
+
+// The title counts granules that contributed a value; the QA pass rate is
+// counted over every granule retrieved. Saying both is what stops "14
+// granules" next to an 18-step QA count reading as a contradiction.
+test('granuleSummary says how many of the retrieved granules held data', () => {
+  assert.equal(
+    granuleSummary({ aggregation_meta: { n_granules: 14, n_granules_retrieved: 18, cadence: 'hourly' } }),
+    '14 of 18 hourly granules with data',
+  )
+  assert.equal(
+    granuleSummary({ aggregation_meta: { n_granules: 3, n_granules_retrieved: 3, cadence: 'daily' } }),
+    '3 daily granules',
+  )
+})

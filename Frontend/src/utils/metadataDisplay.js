@@ -51,9 +51,16 @@ export function granuleSummary(chart) {
   const meta = chart?.aggregation_meta
   const provenance = chart?.provenance || {}
   const nGranules = meta?.n_granules ?? provenance.n_granules
+  const retrieved = meta?.n_granules_retrieved ?? provenance.n_granules_retrieved
   const cadence = meta?.cadence || provenance.cadence || ''
   if (nGranules == null) return null
-  return `${nGranules} ${cadence ? `${cadence} ` : ''}granule${nGranules === 1 ? '' : 's'}`
+  const noun = `${cadence ? `${cadence} ` : ''}granule`
+  // The title counts granules with data; the QA pass rate covers every one
+  // retrieved. Both, when they differ.
+  if (Number.isFinite(retrieved) && retrieved > nGranules) {
+    return `${nGranules} of ${retrieved} ${noun}s with data`
+  }
+  return `${nGranules} ${noun}${nGranules === 1 ? '' : 's'}`
 }
 
 // Details' Temporal section gets the full per-granule date list.

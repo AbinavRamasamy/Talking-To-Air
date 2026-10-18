@@ -15,6 +15,7 @@
  * for the pooled scale, frameDelta for the tier disclosure, frameStats for the
  * per-stop readout, frameStack for the zero-copy layout.
  */
+import { coverageSentence } from '../utils/frameAxis.js'
 import { aggregateAnchor } from '../utils/frameDelta.js'
 import { formatFrameQaRate } from '../utils/frameStats.js'
 import { STATISTIC_LABELS } from '../utils/frameStatistic.js'
@@ -101,7 +102,7 @@ export default function MapScrubber({
       <div style={boxStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
           <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            This map covers {stops.length - 1} {state.axis.cadence || ''} intervals.
+            {coverageSentence(state.axis)}
           </div>
           <button type="button" onClick={onToggle} style={toggleStyle(false)}>Browse time</button>
         </div>

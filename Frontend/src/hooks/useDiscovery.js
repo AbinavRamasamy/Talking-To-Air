@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { normalizeSearchResults } from '../utils/discoveryResults'
-import { cmrTemporal } from '../utils/dateWindow.js'
+import { cmrTemporal, requestWindow } from '../utils/dateWindow.js'
 import { createLatest } from '../utils/latestRequest.js'
 import { apiFetch } from '../utils/apiFetch.js'
 import { API_BASE } from '../config.js'
@@ -76,6 +76,8 @@ export function useDiscovery() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           location: location.trim() || undefined,
+          // A day, not a widened window: the quick-look shows one moment of it,
+          // which the MCP picks (local noon, or the scan nearest it).
           time_range: timeRange.trim() || undefined,
           layer: layer || undefined,
         }),
@@ -101,7 +103,7 @@ export function useDiscovery() {
       const res = await apiFetch(`${API_BASE}/discovery/dataset/${datasetHandle}/coverage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ location: location.trim(), time_range: timeRange.trim() }),
+        body: JSON.stringify({ location: location.trim(), time_range: requestWindow(timeRange) }),
       })
       if (!res.ok) throw new Error(await readErrorMessage(res))
       const data = await res.json()
@@ -144,7 +146,7 @@ export function useDiscovery() {
       const res = await apiFetch(`${API_BASE}/discovery/dataset/${datasetHandle}/granules`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ location: location.trim(), time_range: timeRange.trim() }),
+        body: JSON.stringify({ location: location.trim(), time_range: requestWindow(timeRange) }),
       })
       if (!res.ok) throw new Error(await readErrorMessage(res))
       const data = await res.json()

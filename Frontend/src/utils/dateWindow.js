@@ -30,6 +30,17 @@ export function cmrTemporal(value) {
   return `${start}T00:00:00Z,${end}T23:59:59Z`
 }
 
+/**
+ * The window as the `time_range` quick-look, coverage, and granules take, with
+ * clock times on both ends. A bare `day/day` reaches CMR as an instant at
+ * midnight and matches no granule. '' when unset or invalid.
+ */
+export function requestWindow(value) {
+  const { start, end } = parseWindow(value)
+  if (!start || windowError(start, end)) return ''
+  return `${start}T00:00:00Z/${end}T23:59:59Z`
+}
+
 /** The window as words for the chat message Retrieve sends. */
 export function windowPhrase(value) {
   const { start, end } = parseWindow(value)

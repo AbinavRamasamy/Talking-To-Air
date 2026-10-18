@@ -202,7 +202,7 @@ def _downsample_grid(lats: np.ndarray, lons: np.ndarray, arr: np.ndarray) -> tup
     return lats[::row_step], lons[::col_step], arr[::row_step, ::col_step]
 
 
-def _field_statistics(arr: np.ndarray, lats: np.ndarray) -> dict[str, Any]:
+def _field_statistics(arr: np.ndarray, lats: np.ndarray, region_area: float | None = None) -> dict[str, Any]:
     """Summary statistics for the analyzed region, computed on the FULL
     resolution field -- deliberately before ``_downsample_grid`` thins it, for
     the same reason the overlay PNG is rendered before thinning: what the
@@ -213,19 +213,42 @@ def _field_statistics(arr: np.ndarray, lats: np.ndarray) -> dict[str, Any]:
     (measured on a real TEMPO NO2 L3 scene: true max 9.2418e+17 reported as
     6.9003e+16). ``valid_fraction`` is the one figure that survives thinning
     intact, which is why the discrepancy stayed invisible for so long.
+
+    ``valid_fraction`` is the share of the region's cos(latitude)-weighted
+    area holding a value when the masking step's ``region_area`` is passed --
+    the frame stack's denominator, so the map and its frames agree. Without
+    it the figure is a share of grid cells, which counts everything outside a
+    non-rectangular region as missing; ``valid_basis`` says which it is.
     """
     finite = np.isfinite(arr)
     count = int(finite.sum())
+    valid_fraction, valid_basis = _valid_fraction(arr, lats, finite, region_area)
     if count == 0:
-        return {"count": 0, "valid_fraction": 0.0}
+        return {"count": 0, "valid_fraction": 0.0, "valid_basis": valid_basis}
     values = arr[finite]
     return {
         "count": count,
-        "valid_fraction": round(float(count) / float(arr.size), 6),
+        "valid_fraction": valid_fraction,
+        "valid_basis": valid_basis,
         "mean": float(f"{_area_weighted_mean(arr, lats, finite):.6e}"),
         "min": float(f"{values.min():.6e}"),
         "max": float(f"{values.max():.6e}"),
     }
+
+
+def _valid_fraction(
+    arr: np.ndarray, lats: np.ndarray, finite: np.ndarray, region_area: float | None,
+) -> tuple[float, str]:
+    """``(fraction, basis)``: observed area over ``region_area``, or finite
+    cells over all cells when there is no region area or no latitude axis."""
+    lat_vals = np.asarray(lats, dtype=np.float64)
+    if region_area and region_area > 0 and lat_vals.ndim == 1 and lat_vals.size == arr.shape[0]:
+        # The one weight definition (cos_lat_weights), so this numerator and
+        # the mask's denominator are sums of the same per-cell weights.
+        weights = np.cos(np.deg2rad(lat_vals))
+        observed = float((finite.sum(axis=1, dtype=np.float64) * weights).sum())
+        return round(min(1.0, observed / region_area), 6), "region"
+    return round(float(finite.sum()) / float(arr.size), 6) if arr.size else 0.0, "grid"
 
 
 def _area_weighted_mean(arr: np.ndarray, lats: np.ndarray, finite: np.ndarray) -> float:
@@ -299,7 +322,7 @@ def _render_and_store_overlay(lats: np.ndarray, lons: np.ndarray, arr: np.ndarra
 def _da_to_heatmap_payload(
     da: xr.DataArray, title: str, variable: str, units: str, *,
     diverging: bool = False, render_overlay: bool = False, value_range: tuple[float, float] | None = None,
-    scale_disclosure: dict[str, Any] | None = None,
+    scale_disclosure: dict[str, Any] | None = None, region_area: float | None = None,
 ) -> dict[str, Any]:
     # T51: the overlay PNG rasterization and grid downsampling are pure CPU on
     # the plot path, and are where a "the chart took forever" turn actually
@@ -314,13 +337,14 @@ def _da_to_heatmap_payload(
             da, title, variable, units,
             diverging=diverging, render_overlay=render_overlay,
             value_range=value_range, scale_disclosure=scale_disclosure,
+            region_area=region_area,
         )
 
 
 def _build_heatmap_payload(
     da: xr.DataArray, title: str, variable: str, units: str, *,
     diverging: bool = False, render_overlay: bool = False, value_range: tuple[float, float] | None = None,
-    scale_disclosure: dict[str, Any] | None = None,
+    scale_disclosure: dict[str, Any] | None = None, region_area: float | None = None,
 ) -> dict[str, Any]:
     lat_coord = find_lat_coord(da)
     lon_coord = find_lon_coord(da)
@@ -393,7 +417,7 @@ def _build_heatmap_payload(
         # (arrays).
         overlay.update(_render_and_store_overlay(lats_out, lons_out, arr, colormap.lut, vmin, vmax))
 
-    statistics = _field_statistics(arr, lats_out)
+    statistics = _field_statistics(arr, lats_out, region_area)
 
     lats_out, lons_out, arr = _downsample_grid(lats_out, lons_out, arr)
 
@@ -1137,6 +1161,8 @@ def _provenance(
     if agg_meta:
         provenance["aggregation"] = agg_meta["aggregation_label"]
         provenance["n_granules"] = agg_meta["n_granules"]
+        if "n_granules_retrieved" in agg_meta:
+            provenance["n_granules_retrieved"] = agg_meta["n_granules_retrieved"]
         provenance["cadence"] = agg_meta["cadence"]
         provenance["granule_dates"] = agg_meta["granule_dates"]
         if agg_meta.get("masking"):
@@ -1774,7 +1800,10 @@ def make_plot_singular(mcp_tools: dict[str, BaseTool]) -> BaseTool:
                 resolved_title = f"{variable_name} over {region['name']}"
 
             try:
-                payload = _da_to_heatmap_payload(reduced, resolved_title, variable_name, units, render_overlay=True)
+                payload = _da_to_heatmap_payload(
+                    reduced, resolved_title, variable_name, units, render_overlay=True,
+                    region_area=masked.attrs.get("region_area"),
+                )
                 payload["cmap"]   = cmap or "Spectral_r"
                 payload["bounds"] = list(region["bounds"])  # (minx, miny, maxx, maxy)
                 payload["aggregation_meta"] = agg_meta
@@ -1934,7 +1963,10 @@ def make_plot_multiple(mcp_tools: dict[str, BaseTool]) -> BaseTool:
                     agg_meta = aggregation.meta
                     if da.attrs.get(VARIABLE_RESOLUTION_ATTR):
                         agg_meta["variable_resolution"] = da.attrs[VARIABLE_RESOLUTION_ATTR]
-                    panel = _da_to_heatmap_payload(reduced, region["name"], resolved_variable_name, units, render_overlay=True)
+                    panel = _da_to_heatmap_payload(
+                        reduced, region["name"], resolved_variable_name, units, render_overlay=True,
+                        region_area=masked.attrs.get("region_area"),
+                    )
                     panel["cmap"]   = cmap or "Spectral_r"
                     panel["bounds"] = list(region["bounds"])
                     panel["aggregation_meta"] = agg_meta
