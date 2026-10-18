@@ -647,6 +647,81 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
         too_big = await self._get_overlay(payload, "?thumb=5000")
         self.assertEqual(too_big.status_code, 422)
 
+    def _rescalable_chart(self, *, panels: bool = False):
+        """A chart rendered through the real plot path, so its overlay and
+        value raster are what a live chart stores."""
+        import numpy as np
+
+        from tta_backend.tools.satellite_tools import plot_tools
+        from tta_backend.utils.colormaps import resolve
+
+        lats = np.linspace(30.0, 33.0, 12)
+        lons = np.linspace(-100.0, -96.0, 16)
+        values = np.linspace(2.0, 9.0, lats.size * lons.size, dtype=np.float32).reshape(lats.size, lons.size)
+        overlay = {"bounds": [-100, 30, -96, 33]}
+        overlay.update(plot_tools._render_and_store_overlay(lats, lons, values, resolve("NO2").lut, 3.0, 8.0))
+        node = {"overlay": overlay, "colormap": {"name": "no2_omi"}}
+        if panels:
+            return {"chart_id": "chart-1", "type": "heatmap_multi", "panels": [node], "user_id": self.user.id}
+        return {"chart_id": "chart-1", "type": "heatmap", **node, "user_id": self.user.id}
+
+    async def test_chart_overlay_endpoint_recolors_at_a_requested_scale(self):
+        """Compare mode's shared scale: the stored value raster recolored at
+        full resolution, the same size as the overlay it stands in for."""
+        import io
+
+        from PIL import Image
+
+        payload = self._rescalable_chart()
+
+        native = await self._get_overlay(payload)
+        shared = await self._get_overlay(payload, "?vmin=0&vmax=12&cmap=no2_omi")
+        own_colormap = await self._get_overlay(payload, "?vmin=0&vmax=12")
+
+        self.assertEqual(shared.status_code, 200)
+        self.assertEqual(shared.headers["content-type"], "image/png")
+        self.assertEqual(Image.open(io.BytesIO(shared.content)).size, Image.open(io.BytesIO(native.content)).size)
+        self.assertNotEqual(shared.content, native.content)
+        self.assertEqual(own_colormap.content, shared.content)
+
+    async def test_chart_overlay_endpoint_recolors_a_comparison_panel(self):
+        payload = self._rescalable_chart(panels=True)
+
+        response = await self._get_overlay(payload, "?panel=0&vmin=0&vmax=12")
+        missing = await self._get_overlay(payload, "?panel=3&vmin=0&vmax=12")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(missing.status_code, 404)
+
+    async def test_chart_overlay_endpoint_refuses_a_malformed_scale(self):
+        payload = self._rescalable_chart()
+
+        for query in ("?vmin=1", "?vmax=1", "?vmin=5&vmax=5", "?vmin=6&vmax=5", "?vmin=nan&vmax=1",
+                      "?vmin=0&vmax=1&cmap=jet", "?cmap=no2_omi"):
+            with self.subTest(query=query):
+                response = await self._get_overlay(payload, query)
+                self.assertEqual(response.status_code, 422)
+
+    async def test_chart_overlay_endpoint_404s_a_rescale_without_a_stored_raster(self):
+        """A chart drawn before rasters were stored, or whose raster the store
+        evicted: the frontend recolors the payload's grid instead."""
+        from tta_backend.services import overlay_store
+
+        old_chart = {
+            "chart_id": "chart-1",
+            "overlay": {"bounds": [0, 0, 1, 1], "_path": overlay_store.write_overlay(b"\x89PNG\r\n\x1a\nOLD")},
+            "colormap": {"name": "viridis"},
+            "user_id": self.user.id,
+        }
+        evicted = self._rescalable_chart()
+        overlay_store.delete_overlays([evicted["overlay"]["_values"]["_path"]])
+
+        for payload in (old_chart, evicted):
+            with self.subTest(chart="old" if payload is old_chart else "evicted"):
+                response = await self._get_overlay(payload, "?vmin=0&vmax=1")
+                self.assertEqual(response.status_code, 404)
+        self.assertEqual((await self._get_overlay(evicted)).status_code, 200)
+
     async def test_chart_overlay_endpoint_404s_once_the_overlay_is_evicted(self):
         """An evicted overlay is a normal state: the frontend falls back to
         drawing the grid in the chart payload."""

@@ -179,9 +179,9 @@ class RenderPathTests(OverlayStoreTestCase):
         lats = np.linspace(30.0, 33.0, 8)
         lons = np.linspace(-100.0, -96.0, 10)
         values = np.linspace(offset, offset + 1.0, lats.size * lons.size).reshape(lats.size, lons.size)
-        path = plot_tools._render_and_store_overlay(lats, lons, values, resolve("NO2").lut, 0.0, 2.0)
-        self.assertIsNotNone(path, "the overlay render failed, so this proves nothing")
-        return path
+        fields = plot_tools._render_and_store_overlay(lats, lons, values, resolve("NO2").lut, 0.0, 2.0)
+        self.assertIn("_path", fields, "the overlay render failed, so this proves nothing")
+        return fields["_path"]
 
     def test_rendered_overlays_are_held_to_the_cap(self):
         from tta_backend.services.overlay_store import read_overlay, store_size_bytes
@@ -195,6 +195,34 @@ class RenderPathTests(OverlayStoreTestCase):
 
         self.assertIsNone(read_overlay(first))
         self.assertIsNotNone(read_overlay(second))
+
+    def test_a_render_stores_its_value_raster_and_the_url_says_so(self):
+        import numpy as np
+
+        from tta_backend.services.overlay_store import read_overlay
+        from tta_backend.tools.satellite_tools import plot_tools
+        from tta_backend.utils.colormaps import resolve
+
+        lats = np.linspace(30.0, 33.0, 8)
+        lons = np.linspace(-100.0, -96.0, 10)
+        values = np.linspace(0.5, 1.5, lats.size * lons.size).reshape(lats.size, lons.size)
+        fields = plot_tools._render_and_store_overlay(lats, lons, values, resolve("NO2").lut, 0.0, 2.0)
+
+        self.assertIsNotNone(read_overlay(fields["_values"]["_path"]))
+        # The raster holds the reprojected grid, whose bilinear resampling can
+        # only pull the extremes inward.
+        self.assertTrue(0.5 <= fields["_values"]["lo"] < 0.51, fields["_values"])
+        self.assertTrue(1.49 < fields["_values"]["hi"] <= 1.5, fields["_values"])
+
+        payload = {"chart_id": "c1", "type": "heatmap", "overlay": fields}
+        # A chart drawn before rasters were stored.
+        old_payload = {"chart_id": "c2", "type": "heatmap", "overlay": {"_path": fields["_path"]}}
+        plot_tools._wire_overlay_urls(payload)
+        plot_tools._wire_overlay_urls(old_payload)
+
+        self.assertTrue(payload["overlay"]["rescalable"])
+        self.assertEqual(old_payload["overlay"]["url"], "/chart/c2/overlay.png")
+        self.assertNotIn("rescalable", old_payload["overlay"])
 
 
 class ChartOverlayPathsTests(unittest.TestCase):
@@ -218,6 +246,21 @@ class ChartOverlayPathsTests(unittest.TestCase):
         }
 
         self.assertEqual(sorted(chart_overlay_paths(payload)), ["/s/d.png", "/s/p0.png", "/s/p1.png"])
+
+    def test_value_rasters_are_named_beside_their_overlays(self):
+        from tta_backend.services.overlay_store import chart_overlay_paths
+
+        single = {"type": "heatmap", "overlay": {"_path": "/s/a.png", "_values": {"_path": "/s/a-v.png"}}}
+        comparison = {
+            "type": "heatmap_multi",
+            "panels": [{"overlay": {"_path": "/s/p0.png", "_values": {"_path": "/s/p0-v.png"}}}],
+            "difference": {"overlay": {"_path": "/s/d.png", "_values": {"_path": "/s/d-v.png"}}},
+        }
+
+        self.assertEqual(sorted(chart_overlay_paths(single)), ["/s/a-v.png", "/s/a.png"])
+        self.assertEqual(
+            sorted(chart_overlay_paths(comparison)), ["/s/d-v.png", "/s/d.png", "/s/p0-v.png", "/s/p0.png"],
+        )
 
     def test_charts_without_a_rendered_overlay_name_nothing(self):
         from tta_backend.services.overlay_store import chart_overlay_paths

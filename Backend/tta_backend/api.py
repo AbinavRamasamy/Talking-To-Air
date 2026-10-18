@@ -1048,20 +1048,54 @@ async def export_chart_png(chart_id: str, request: Request) -> Response:
     )
 
 
-def _chart_overlay_path(payload: dict[str, Any], panel: int | None) -> str | None:
-    """Resolve the stored overlay PNG path for a chart, or its Nth panel /
-    difference panel for a heatmap_multi comparison (T23)."""
+def _chart_overlay_source(payload: dict[str, Any], panel: int | None) -> dict[str, Any] | None:
+    """The part of a chart payload that owns the overlay: the chart itself, or
+    for a heatmap_multi comparison its Nth panel / difference panel (T23)."""
     if payload.get("type") == "heatmap_multi":
         if panel is not None:
             panels = payload.get("panels") or []
-            if 0 <= panel < len(panels):
-                path: str | None = (panels[panel].get("overlay") or {}).get("_path")
-                return path
-            return None
-        path = (payload.get("difference") or {}).get("overlay", {}).get("_path")
-        return path
-    path = (payload.get("overlay") or {}).get("_path")
+            source = panels[panel] if 0 <= panel < len(panels) else None
+        else:
+            source = payload.get("difference")
+        return source if isinstance(source, dict) else None
+    return payload
+
+
+def _chart_overlay_path(payload: dict[str, Any], panel: int | None) -> str | None:
+    """Resolve the stored overlay PNG path for a chart or one of its panels."""
+    source = _chart_overlay_source(payload, panel) or {}
+    path: str | None = (source.get("overlay") or {}).get("_path")
     return path
+
+
+async def _rescaled_overlay_png(
+    payload: dict[str, Any], panel: int | None, vmin: float | None, vmax: float | None, cmap: str | None,
+) -> bytes:
+    """The overlay recolored at ``vmin``..``vmax`` from its stored value
+    raster, at full resolution. A 404 covers a chart drawn before rasters were
+    stored and a raster the store has evicted; the frontend then recolors the
+    payload's thinned grid instead, as it did before."""
+    from tta_backend.utils import colormaps
+    from tta_backend.utils.overlay_render import render_value_raster_png
+
+    if vmin is None or vmax is None or not (math.isfinite(vmin) and math.isfinite(vmax)) or vmin >= vmax:
+        raise HTTPException(status_code=422, detail="vmin and vmax must both be finite, with vmin below vmax.")
+    source = _chart_overlay_source(payload, panel)
+    if source is None:
+        raise HTTPException(status_code=404, detail="This chart has no such panel.")
+    name = cmap or (source.get("colormap") or {}).get("name")
+    colormap = colormaps.by_name(name) if name else None
+    if colormap is None:
+        raise HTTPException(status_code=422, detail="Unknown colormap.")
+    raster = (source.get("overlay") or {}).get("_values") or {}
+    content = None
+    if raster.get("_path"):
+        content = await asyncio.to_thread(overlay_store.read_overlay, raster["_path"])
+    if content is None:
+        raise HTTPException(status_code=404, detail="This chart has no stored values to recolor.")
+    return await asyncio.to_thread(
+        render_value_raster_png, content, float(raster["lo"]), float(raster["hi"]), colormap.lut, vmin, vmax,
+    )
 
 
 @app.get("/chart/{chart_id}/overlay.png")
@@ -1071,17 +1105,25 @@ async def chart_overlay_png(
     request: Request,
     panel: int | None = None,
     thumb: int | None = Query(default=None, ge=16, le=256),
+    vmin: float | None = None,
+    vmax: float | None = None,
+    cmap: str | None = Query(default=None, max_length=64),
 ) -> Response:
     payload = await _get_owned_chart(chart_id, request.state.current_user.id)
-    overlay_path = _chart_overlay_path(payload, panel)
-    # A 404 covers both a chart that never had an overlay and one whose overlay
-    # the store has evicted. The frontend falls back to drawing the payload's
-    # grid in either case.
-    content = None
-    if overlay_path:
-        content = await asyncio.to_thread(overlay_store.read_overlay, overlay_path)
-    if content is None:
-        raise HTTPException(status_code=404, detail="This chart has no rendered overlay.")
+    if vmin is not None or vmax is not None or cmap is not None:
+        # A scale chosen after the chart was drawn: compare mode's shared scale.
+        content = await _rescaled_overlay_png(payload, panel, vmin, vmax, cmap)
+    else:
+        overlay_path = _chart_overlay_path(payload, panel)
+        # A 404 covers both a chart that never had an overlay and one whose
+        # overlay the store has evicted. The frontend falls back to drawing the
+        # payload's grid in either case.
+        stored = None
+        if overlay_path:
+            stored = await asyncio.to_thread(overlay_store.read_overlay, overlay_path)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="This chart has no rendered overlay.")
+        content = stored
     if thumb is not None:
         content = await asyncio.to_thread(overlay_store.thumbnail_png, content, thumb)
     return Response(content=content, media_type="image/png", headers={"Cache-Control": "no-store"})

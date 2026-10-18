@@ -1,13 +1,33 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { resolveOverlayMode, resolveThumbnailMode } from '../src/utils/overlayMode.js'
+import { rescaledOverlayUrl, resolveOverlayMode, resolveThumbnailMode } from '../src/utils/overlayMode.js'
 
 test('no override with a native overlay url resolves to native', () => {
   assert.equal(resolveOverlayMode(null, '/chart/abc.png'), 'native')
 })
 
-test('an active override always resolves to canvas, even with a native url available', () => {
+test('an override on an overlay with no stored value raster resolves to canvas', () => {
   assert.equal(resolveOverlayMode({ vmin: 0, vmax: 1 }, '/chart/abc.png'), 'canvas')
+})
+
+test('an override on a rescalable overlay asks the server to recolor it', () => {
+  assert.equal(resolveOverlayMode({ vmin: 0, vmax: 1 }, '/chart/abc.png', null, true), 'rescaled')
+  assert.equal(resolveOverlayMode(null, '/chart/abc.png', null, true), 'native')
+  assert.equal(resolveOverlayMode({ vmin: 0, vmax: 1 }, undefined, null, true), 'canvas')
+  const frame = { values: new Float32Array(4), lats: [0, 1], lons: [0, 1] }
+  assert.equal(resolveOverlayMode({ vmin: 0, vmax: 1 }, '/chart/abc.png', frame, true), 'canvas')
+})
+
+test('the rescaled url carries the scale, and joins a query the url already has', () => {
+  const override = { vmin: 0.47, vmax: 7.7e15, colormap: { name: 'no2_omi', lut: [] } }
+  assert.equal(
+    rescaledOverlayUrl('/chart/c1/overlay.png', override),
+    '/chart/c1/overlay.png?vmin=0.47&vmax=7700000000000000&cmap=no2_omi',
+  )
+  assert.equal(
+    rescaledOverlayUrl('/chart/c1/overlay.png?panel=1', { vmin: -2, vmax: 2 }),
+    '/chart/c1/overlay.png?panel=1&vmin=-2&vmax=2',
+  )
 })
 
 test('no override and no native url falls back to canvas', () => {
