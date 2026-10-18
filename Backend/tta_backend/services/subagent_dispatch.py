@@ -294,7 +294,7 @@ async def run_satellite(
         context_sink.update(captured_context)
     elif captured_context and conversation_thread_id:
         await _persist_satellite_context(
-            conversation_thread_id, {**satellite_context, **captured_context}
+            conversation_thread_id, merge_satellite_context(satellite_context, [captured_context])
         )
     return finalized
 
@@ -311,11 +311,11 @@ async def persist_dispatch_contexts(
 
     Merged in request order over what the thread already holds: a later
     request wins a key, except chart ids, which accumulate so every chart the
-    batch drew stays nameable to a follow-up, as for one run that draws two."""
-    satellite_captured = _merge_captured_contexts(satellite)
-    if satellite_captured:
+    batch drew stays nameable to a follow-up, as for one run that draws two,
+    and the area, which merge_satellite_context keeps as one pair."""
+    if any(satellite):
         prior = await _load_satellite_context(conversation_thread_id)
-        await _persist_satellite_context(conversation_thread_id, {**prior, **satellite_captured})
+        await _persist_satellite_context(conversation_thread_id, merge_satellite_context(prior, satellite))
     ground_captured = _merge_captured_contexts(ground)
     if ground_captured:
         # Best-effort, like the satellite side: this runs after the batch, so
@@ -325,6 +325,40 @@ async def persist_dispatch_contexts(
             await save_ground_monitor_context(conversation_thread_id, {**prior, **ground_captured})
         except Exception:
             logger.warning("ground_context_save_failed", exc_info=True)
+
+
+# The saved area: a place name and the handle drawn for it. They describe one
+# area, so they are only ever saved, replaced or dropped together.
+_AREA_KEYS = ("location", "aoi_handle")
+
+
+def _batch_area(prior: dict[str, str], contexts: list[dict[str, str]]) -> dict[str, str] | None:
+    """The area a batch leaves behind: None when no run touched an area (the
+    saved one stands), {} when runs used different areas (nothing to offer a
+    follow-up), else that one area. A run that reused the saved handle without
+    naming its place keeps the saved place."""
+    areas = set()
+    for context in contexts:
+        location, handle = context.get("location"), context.get("aoi_handle")
+        if location is None and handle is None:
+            continue
+        if location is None and handle == prior.get("aoi_handle"):
+            location = prior.get("location")
+        areas.add((location, handle))
+    if not areas:
+        return None
+    if len(areas) > 1:
+        return {}
+    location, handle = areas.pop()
+    return {key: value for key, value in (("location", location), ("aoi_handle", handle)) if value is not None}
+
+
+def merge_satellite_context(prior: dict[str, str], contexts: list[dict[str, str]]) -> dict[str, str]:
+    """The satellite context to save after ``contexts`` ran, over ``prior``."""
+    captured = {k: v for k, v in _merge_captured_contexts(contexts).items() if k not in _AREA_KEYS}
+    area = _batch_area(prior, contexts)
+    base = dict(prior) if area is None else {k: v for k, v in prior.items() if k not in _AREA_KEYS}
+    return {**base, **captured, **(area or {})}
 
 
 def _merge_captured_contexts(contexts: list[dict[str, str]]) -> dict[str, str]:
@@ -818,11 +852,18 @@ def _capture_satellite_context(name: Any, args: Any, captured: dict[str, str]) -
     if name == "search_datasets" and args.get("query"):
         captured["dataset_query"] = str(args["query"])
     elif name == "define_area_of_interest" and args.get("location"):
+        # A new area: its handle arrives on the next call that carries one.
         captured["location"] = str(args["location"])
+        captured.pop("aoi_handle", None)
     if args.get("dataset_handle"):
         captured["dataset_handle"] = str(args["dataset_handle"])
     if args.get("aoi_handle"):
-        captured["aoi_handle"] = str(args["aoi_handle"])
+        handle = str(args["aoi_handle"])
+        defined_here = "location" in captured and "aoi_handle" not in captured
+        if not defined_here and captured.get("aoi_handle") != handle:
+            # A handle this run did not define: its place is not known here.
+            captured.pop("location", None)
+        captured["aoi_handle"] = handle
     if args.get("time_range"):
         captured["last_time_range"] = str(args["time_range"])
 
@@ -924,7 +965,8 @@ def _inject_satellite_context(task: str, context: dict[str, str]) -> str:
         bits.append(f"dataset_handle={context['dataset_handle']}")
     if context.get("location") and not new_area:
         bits.append(f"location={context['location']}")
-    if context.get("aoi_handle") and not new_area:
+    # A handle is offered only with the place it was drawn for.
+    if context.get("aoi_handle") and context.get("location") and not new_area:
         bits.append(f"aoi_handle={context['aoi_handle']}")
     if context.get("last_time_range"):
         bits.append(f"previously_checked_range={context['last_time_range']}")
