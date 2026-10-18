@@ -5,6 +5,8 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { starterMessage } from '../utils/starterPrompts'
+import CardPreview from './CardPreview.jsx'
+import { compactDate } from '../utils/displayFormat.js'
 import { compareBadgeLabel, isChartComparable, isSelectionFull, slotIndexOf } from '../utils/compareMode'
 import { reachableArtifacts } from '../utils/artifactReachability'
 import { toolStepsTitle } from '../utils/toolSteps'
@@ -12,11 +14,6 @@ import VariableChoicePicker from './VariableChoicePicker'
 import { API_BASE } from '../config.js'
 
 const TYPE_LABEL = { map: 'Map', comparison: 'Comparison', timeseries: 'Time series', table: 'Table' }
-
-function compactDate(value) {
-  if (!value) return ''
-  return String(value).replace('T00:00:00', '').replace('T23:59:59', '').replace(/Z$/, '')
-}
 
 function outputLabel(item) {
   if (item.kind === 'chart') {
@@ -115,10 +112,7 @@ function OutputCard({ item, active, inert, slotBadge, onClick }) {
         transition: 'border-color 0.15s, opacity 0.15s',
       }}
     >
-      <div style={{
-        width: '44px', height: '44px', borderRadius: '7px', flexShrink: 0,
-        background: 'linear-gradient(135deg, oklch(0.55 0.15 240), oklch(0.75 0.18 80), oklch(0.6 0.2 30))',
-      }} />
+      <CardPreview item={item} />
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{
           fontSize: '12.5px', fontWeight: 700, color: 'var(--text-primary)',

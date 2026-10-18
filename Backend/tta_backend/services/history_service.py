@@ -7,10 +7,10 @@ from typing import Any
 from tta_backend.models import parse_dispatch_result
 from tta_backend.services.artifact_store import artifact_store
 from tta_backend.services.chart_service import ChartService
-from tta_backend.services.consulted_header import consulted_agents, with_consulted_header
+from tta_backend.services.consulted_header import consulted_sources, merge_sources, with_sources_header
 from tta_backend.utils.message_utils import flatten_text_content
 
-# Working key on an assistant message while history is built: the agents its
+# Working key on an assistant message while history is built: the sources its
 # dispatch results show were consulted. Removed before the message is returned.
 _CONSULTED = "_consulted"
 
@@ -59,8 +59,7 @@ class HistoryService:
                 await self._attach_tool_output(result, tool_text, chart_payloads, thread_id, user_id)
                 assistant = self._last_assistant(result)
                 if assistant is not None:
-                    consulted = assistant.setdefault(_CONSULTED, [])
-                    consulted += [a for a in consulted_agents(tool_text) if a not in consulted]
+                    assistant[_CONSULTED] = merge_sources(assistant.get(_CONSULTED, []), consulted_sources(tool_text))
         return [self._with_header(msg) for msg in self._merge_adjacent_assistant_messages(result)]
 
     def _with_header(self, msg: dict[str, Any]) -> dict[str, Any]:
@@ -70,7 +69,7 @@ class HistoryService:
         dispatch batch (pre-T64 ask_* turns) keeps the text it was saved with."""
         consulted = msg.pop(_CONSULTED, None)
         if consulted:
-            msg["content"] = with_consulted_header(msg["content"], consulted)
+            msg["content"] = with_sources_header(msg["content"], consulted)
         return msg
 
     def _assistant_message(self, msg: Any) -> dict[str, Any]:
@@ -173,10 +172,8 @@ class HistoryService:
                     prev.setdefault("artifacts", [])
                     if artifact not in prev["artifacts"]:
                         prev["artifacts"].append(artifact)
-                for agent in msg.get(_CONSULTED, []):
-                    consulted = prev.setdefault(_CONSULTED, [])
-                    if agent not in consulted:
-                        consulted.append(agent)
+                if msg.get(_CONSULTED):
+                    prev[_CONSULTED] = merge_sources(prev.get(_CONSULTED, []), msg[_CONSULTED])
             else:
                 merged.append(msg)
         return merged

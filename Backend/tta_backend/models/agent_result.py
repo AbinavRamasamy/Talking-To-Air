@@ -91,6 +91,10 @@ class DispatchItemResult(BaseModel):
     status: DispatchStatus
     reason: str | None = None
     result: AgentResult | None = None
+    # The datasets (or EPA AQS) the run drew on, recorded when it ran: the
+    # checkpointed copy of ``result`` keeps only chart references. Empty when
+    # the run failed; None on an item saved before sources were recorded.
+    sources: list[str] | None = None
 
 
 class DispatchResult(BaseModel):

@@ -146,7 +146,7 @@ class FastPathHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             frames = await _fast_path_frames(ground=SilentGroundAgent(think_seconds=0.25))
 
         joined = "".join(frames)
-        self.assertIn("Agent consulted: GROUND", joined)
+        self.assertIn("Data sources: EPA AQS", joined)
         self.assertEqual(joined.count("event: done"), 1, joined)
         self.assertTrue(frames[-1].startswith("event: done"), frames[-1])
 

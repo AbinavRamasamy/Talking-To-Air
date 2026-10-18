@@ -24,6 +24,7 @@ from tta_backend.models import (
     GroundRequest,
     canonical_key,
 )
+from tta_backend.services.consulted_header import result_sources
 from tta_backend.services.subagent_dispatch import render_unexpected_exception
 from tta_backend.utils.streaming import current_thread_id, dispatch_lane_scope, emit_status, get_call_budget
 
@@ -163,6 +164,7 @@ async def execute_dispatch(requests: list[AgentRequest], run_one: RunOne) -> Dis
         DispatchItemResult(
             index=index, agent=request.agent, intent=request.intent,
             status=status if owners.get(key) == index else "duplicate", result=result,
+            sources=[] if status == "error" else result_sources(request.agent, result),
         )
         for index, (key, request, (status, result)) in enumerate(zip(keys, requests, outcomes, strict=True))
     ])

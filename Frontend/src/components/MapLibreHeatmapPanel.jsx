@@ -34,6 +34,8 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 // bundle the worker with its shared chunk and hand back the emitted URL.
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { colorbarGeometry, scaleClipNote } from '../utils/colorbarGeometry.js'
+import { scaledTicks, scaledUnitsLabel } from '../utils/displayFormat.js'
+import SciText from './SciText.jsx'
 import { buildCanvasFallbackFrame } from '../utils/canvasFallback.js'
 import { BORDER_LINE, fetchUsStatesGeoJSON, isConusBounds, overlayBeforeId } from '../utils/regionBorders.js'
 import { resolveOverlayMode } from '../utils/overlayMode.js'
@@ -378,32 +380,29 @@ export default function MapLibreHeatmapPanel({ payload, height = 420, colorScale
           {title}
         </div>
       )}
-      <div style={{ position: 'relative', width: '100%', height, borderRadius: '8px', overflow: 'hidden' }}>
-        <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-
+      {/* `height` covers the map AND its legend, so a caller that sized the
+          panel to an exact box (FittedMap, compare tiles) keeps it in that box:
+          the map takes whatever the legend leaves. */}
+      <div style={{ height, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0, borderRadius: '8px', overflow: 'hidden' }}>
+          <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+        </div>
         {!hideLegend && <MapColorbar gradientStops={gradientStops} ticks={ticks} units={units} clipNote={clipNote} />}
       </div>
     </div>
   )
 }
 
+// The legend sits in its own strip under the map rather than over it, where
+// the basemap attribution covered it and the text had to stay tiny.
 function MapColorbar({ gradientStops, ticks, units, clipNote }) {
   if (!gradientStops.length) return null
   const gradientId = 'tta-colorbar-gradient'
+  const { labels, multiplier } = scaledTicks(ticks.map(tick => tick.value))
+  const unitsLabel = scaledUnitsLabel(multiplier, units)
   return (
-    <div
-      style={{
-        position: 'absolute',
-        left: 12,
-        bottom: 12,
-        background: 'rgba(255,255,255,0.92)',
-        borderRadius: '6px',
-        padding: '6px 10px 8px',
-        boxShadow: 'var(--shadow-sm)',
-        zIndex: 1,
-      }}
-    >
-      <svg width={180} height={14} style={{ display: 'block' }}>
+    <div style={{ marginTop: '10px', maxWidth: '440px', flexShrink: 0 }}>
+      <svg viewBox="0 0 100 10" preserveAspectRatio="none" style={{ display: 'block', width: '100%', height: 14 }}>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
             {gradientStops.map((stop, i) => (
@@ -411,20 +410,22 @@ function MapColorbar({ gradientStops, ticks, units, clipNote }) {
             ))}
           </linearGradient>
         </defs>
-        <rect x={0} y={0} width={180} height={14} fill={`url(#${gradientId})`} rx={2} />
+        <rect x={0} y={0} width={100} height={10} fill={`url(#${gradientId})`} rx={1} />
       </svg>
-      <div style={{ display: 'flex', justifyContent: 'space-between', width: 180, marginTop: 3 }}>
-        {ticks.map((tick, i) => (
-          <span key={i} style={{ fontSize: '9px', color: '#333', fontFamily: 'var(--font)' }}>
-            {tick.value.toExponential(1)}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+        {labels.map((label, i) => (
+          <span key={i} style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'var(--font)', fontVariantNumeric: 'tabular-nums' }}>
+            {label}
           </span>
         ))}
       </div>
-      {units && (
-        <div style={{ fontSize: '9px', color: '#555', textAlign: 'center', marginTop: 2 }}>{units}</div>
+      {unitsLabel && (
+        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', textAlign: 'center', marginTop: 4 }}>
+          <SciText>{unitsLabel}</SciText>
+        </div>
       )}
       {clipNote && (
-        <div style={{ fontSize: '8px', color: '#777', textAlign: 'center', marginTop: 2, fontStyle: 'italic' }}>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', marginTop: 2 }}>
           {clipNote}
         </div>
       )}

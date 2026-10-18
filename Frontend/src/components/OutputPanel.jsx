@@ -21,6 +21,8 @@ import { MetaField } from './metadataPrimitives.jsx'
 import { smallButtonStyle, copyToClipboard } from '../utils/metadataUiHelpers.js'
 import { resolveMasking, resolveRegionFidelity, formatQaPassRate, regionTypeNote, regionOriginNote } from '../utils/maskingProvenance'
 import { evidenceRows } from '../utils/evidenceSummary'
+import { compactDate, formatStatValue, formatUnits } from '../utils/displayFormat.js'
+import SciText from './SciText.jsx'
 import { filledCharts } from '../utils/compareMode'
 import { focusChartPayload } from '../utils/compareSlotOverview'
 import { shouldShowCollapseHint } from '../utils/compareLayoutHint'
@@ -56,11 +58,6 @@ const panelRootStyle = {
 // not, because it centres its content rather than scrolling it.
 const panelRootClipped = { ...panelRootStyle, overflow: 'hidden' }
 
-function compactDate(value) {
-  if (!value) return ''
-  return String(value).replace('T00:00:00', '').replace('T23:59:59', '').replace(/Z$/, '')
-}
-
 function chartTitle(chart) {
   return chart.title || chart.provenance?.variable || chart.variable || 'Output'
 }
@@ -70,7 +67,7 @@ function chartMetaChips(chart) {
   const chips = []
   if (p.dataset) chips.push(p.dataset)
   const units = chart.units || p.units
-  if (units) chips.push(units)
+  if (units) chips.push(formatUnits(units))
   const dateRange = [compactDate(p.start_date), compactDate(p.end_date)].filter(Boolean).join(' → ')
   if (dateRange) chips.push(dateRange)
   if (p.region_name) chips.push(p.region_name)
@@ -81,7 +78,7 @@ function artifactMetaChips(artifact) {
   const meta = artifact.metadata || {}
   const chips = []
   if (meta.variable) chips.push(meta.variable)
-  if (meta.units) chips.push(meta.units)
+  if (meta.units) chips.push(formatUnits(meta.units))
   if (Array.isArray(meta.bbox)) chips.push(meta.bbox.map(v => Number(v).toFixed(2)).join(', '))
   return chips
 }
@@ -109,7 +106,7 @@ function MetaChip({ children }) {
       background: 'var(--bg-secondary)', border: '1px solid var(--border)',
       borderRadius: '7px', padding: '5px 10px',
     }}>
-      {children}
+      <SciText>{children}</SciText>
     </div>
   )
 }
@@ -123,7 +120,7 @@ function StatCard({ label, value, subtitle }) {
       borderRadius: '10px', padding: '11px 13px',
     }}>
       <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '5px' }}>{label}</div>
-      <div style={{ fontSize: '15px', fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{value}</div>
+      <div style={{ fontSize: '15px', fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}><SciText>{value}</SciText></div>
       {subtitle && (
         <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.35 }}>
           {subtitle}
@@ -231,7 +228,7 @@ function EvidenceSection({ chart }) {
               )}
             </div>
             <div style={{ fontSize: '13px', fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', whiteSpace: 'nowrap', textAlign: 'right' }}>
-              {row.valueText}
+              <SciText>{row.valueText}</SciText>
             </div>
           </div>
         ))}
@@ -306,7 +303,6 @@ function StatisticsTab({ chart, stop, statistic = 'mean' }) {
       </div>
     )
   }
-  const fmt = (n) => Number.isFinite(n) ? n.toExponential(3) : '—'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       {isInterval && (
@@ -320,9 +316,9 @@ function StatisticsTab({ chart, stop, statistic = 'mean' }) {
             they are of -- the regional max of the MEAN field is a different
             number from the max plane's peak (50.5 against 100.0 on Phase 12's
             fixture), and they wear the same word. */}
-        <StatCard label="Mean" value={`${fmt(stats.mean)} ${stats.units || ''}`} subtitle={stats.fieldNote} />
-        <StatCard label="Max" value={`${fmt(stats.max)} ${stats.units || ''}`} subtitle={stats.fieldNote} />
-        <StatCard label="Min" value={`${fmt(stats.min)} ${stats.units || ''}`} subtitle={stats.fieldNote} />
+        <StatCard label="Mean" value={formatStatValue(stats.mean, stats.units)} subtitle={stats.fieldNote} />
+        <StatCard label="Max" value={formatStatValue(stats.max, stats.units)} subtitle={stats.fieldNote} />
+        <StatCard label="Min" value={formatStatValue(stats.min, stats.units)} subtitle={stats.fieldNote} />
         {/* "Valid values" answers "did we get data at all"; the QA pass rate
             answers "how much of what we got survived the quality mask". Both
             stay, and each states its basis so they can't be conflated. The
@@ -416,7 +412,7 @@ function VariableDefinitionSection({ chart }) {
   return (
     <>
       <MetaField label="Long name" value={longName} />
-      <MetaField label="Units" value={units} />
+      <MetaField label="Units" value={formatUnits(units)} />
       <MetaField label="Advisory notes" value={advisoryNotes} />
       <MetaField label="Valid range" value={validRange} />
       <MetaField label="Mask note" value={maskNote} />
@@ -1064,7 +1060,7 @@ export default function OutputPanel({
           <>
             <MapLibreHeatmapPanel
               payload={chart}
-              height={480}
+              height={560}
               colorScaleOverride={scrubScale}
               frame={activeFrame}
             />

@@ -22,6 +22,7 @@ import {
 } from './utils/authSession'
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { API_BASE } from './config.js'
+import { windowPhrase } from './utils/dateWindow.js'
 
 // Thin clickable rail standing in for a side column while it's manually
 // collapsed -- keeps a one-click way back rather than the column just
@@ -230,7 +231,7 @@ function SessionExpiredModal({ onSignIn }) {
   )
 }
 
-function AuthenticatedApp({ onLogout }) {
+function AuthenticatedApp({ user, onLogout }) {
   const {
     jobs,
     error: jobsError,
@@ -268,7 +269,8 @@ function AuthenticatedApp({ onLogout }) {
     const label = dataset.summary || dataset.dataset_handle
     const parts = [`Retrieve ${label} (${dataset.dataset_handle})`]
     if (location.trim()) parts.push(`over ${location.trim()}`)
-    if (timeRange.trim()) parts.push(`for ${timeRange.trim()}`)
+    const when = windowPhrase(timeRange)
+    if (when) parts.push(when)
     sendMessage(`${parts.join(' ')}.`)
   }, [sendMessage])
 
@@ -423,6 +425,7 @@ function AuthenticatedApp({ onLogout }) {
           onNew={handleNewSession}
           onDelete={deleteSession}
           onLogout={handleLogout}
+          user={user}
           artifacts={artifacts}
           onCollapse={toggleSessionsCollapsed}
         />
@@ -635,6 +638,7 @@ export default function App() {
         // change on every auto-refresh -- every 45 minutes, decision 10 -- and
         // React would discard this entire tree mid-analysis.
         key={userIdOf(state)}
+        user={state.session?.user}
         onLogout={handleLogout}
       />
       {showReauthModal(state) && <SessionExpiredModal onSignIn={handleReauth} />}

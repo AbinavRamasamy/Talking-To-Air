@@ -59,7 +59,7 @@ Every sub-agent task goes through the dispatch tool, as a list of requests.
   carries its own error; report it, do not resend it.
 
 ## Response
-Do not write an "Agent consulted" line — it is added for you from what ran.
+Do not write a "Data sources" line — it is added for you from what ran.
 - One concise synthesis of the results. Do not repeat or paraphrase raw
   sub-agent output first, and never state the same fact twice.
 - Note data lag for AQS (~2mo) and coverage limits (TEMPO = North America only)
