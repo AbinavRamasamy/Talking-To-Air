@@ -89,6 +89,35 @@ class DispatchJsonSchemaTests(unittest.TestCase):
             sorted(b["properties"]["agent"]["const"] for b in branches), ["ground", "satellite"],
         )
 
+    def test_every_request_branch_requires_its_agent_tag(self):
+        """Validation needs ``agent`` to pick the union branch, but the field
+        has a default, so the schema listed it as optional and the stripped
+        discriminator no longer said otherwise. The model left it out and its
+        first dispatch call was rejected every time (live 2026-10-18:
+        "Unable to extract tag using discriminator 'agent'")."""
+        from tta_backend.models.agent_request import dispatch_json_schema
+
+        schema = dispatch_json_schema()
+        for ref in schema["properties"]["requests"]["items"]["anyOf"]:
+            name = ref["$ref"].split("/")[-1]
+            with self.subTest(branch=name):
+                self.assertIn("agent", schema["$defs"][name]["required"])
+
+    def test_a_request_the_schema_accepts_also_validates(self):
+        """The schema and validation agree: a request carrying every required
+        field of its branch passes DispatchArgs."""
+        from tta_backend.models.agent_request import DispatchArgs, dispatch_json_schema
+
+        defs = dispatch_json_schema()["$defs"]
+        samples = {
+            "SatelliteRequest": {"agent": "satellite", "intent": "visualize", "variable": "NO2", "location": "New Jersey"},
+            "GroundRequest": {"agent": "ground", "intent": "readings", "pollutant": "NO2", "location": "Newark"},
+        }
+        for name, request in samples.items():
+            with self.subTest(branch=name):
+                self.assertEqual(set(defs[name]["required"]) - set(request), set())
+                DispatchArgs.model_validate({"requests": [request]})
+
     def test_carries_no_keyword_outside_the_gated_shape(self):
         """oneOf/discriminator come from the discriminated union and
         additionalProperties from extra="forbid"; none of them was gated, so
