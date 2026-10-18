@@ -65,6 +65,7 @@ from tta_backend.datasets.mask_info import col_info_for_variable, resolve_mask_i
 from tta_backend.datasets.variable_roles import classify_inventory, related_variables
 from tta_backend.earthdata_mcp.results import (
     CATEGORY_DIMENSION_CHOICE_REQUIRED,
+    CATEGORY_NO_DATA,
     CATEGORY_TOO_LARGE,
     MCPToolError,
 )
@@ -108,6 +109,14 @@ _RENDER_TYPE_TO_ARTIFACT_PREFIX = {
 
 _resolver = RegionResolver()
 _aggregation_service = AggregationService()
+
+
+def _resolve_failure_status(error: Any) -> str:
+    """The render status for a typed refusal from the resolve/aggregate stage:
+    an area outside the retrieved data is not a variable choice."""
+    if isinstance(error, dict) and error.get("category") == CATEGORY_NO_DATA:
+        return "No data in the requested area."
+    return "Visualization needs a variable or dimension choice."
 
 
 def overlay_store_dir() -> str:
@@ -1781,7 +1790,7 @@ def make_plot_singular(mcp_tools: dict[str, BaseTool]) -> BaseTool:
             emit_status("Visualization failed while processing map bounds.", stage=STAGE_RENDER)
             return json.dumps({"error": error_message})
         if stage == "resolve":
-            emit_status("Visualization needs a variable or dimension choice.", stage=STAGE_RENDER)
+            emit_status(_resolve_failure_status(error_message), stage=STAGE_RENDER)
             return json.dumps({"error": error_message})
         if stage == "payload":
             emit_status("Visualization failed while building chart data.", stage=STAGE_RENDER)
@@ -1936,7 +1945,7 @@ def make_plot_multiple(mcp_tools: dict[str, BaseTool]) -> BaseTool:
                 emit_status("Visualization failed while processing map bounds.", stage=STAGE_RENDER)
                 return json.dumps({"error": error_message})
             if stage == "resolve":
-                emit_status("Visualization needs a variable or dimension choice.", stage=STAGE_RENDER)
+                emit_status(_resolve_failure_status(error_message), stage=STAGE_RENDER)
                 return json.dumps({"error": error_message})
             if stage == "payload":
                 emit_status("Visualization failed while building chart data.", stage=STAGE_RENDER)
