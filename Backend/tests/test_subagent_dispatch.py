@@ -879,7 +879,8 @@ class RunSatelliteTests(unittest.IsolatedAsyncioTestCase):
         from tta_backend.utils.streaming import get_call_budget
         get_call_budget().clear()
 
-        with patch.object(subagent_dispatch, "get_satellite_context", AsyncMock(return_value={"location": "New Jersey"})), \
+        prior = {"location": "New Jersey", "dataset_query": "TEMPO_NO2"}
+        with patch.object(subagent_dispatch, "get_satellite_context", AsyncMock(return_value=prior)), \
              patch.object(subagent_dispatch, "save_satellite_context", AsyncMock()) as save_mock:
             await subagent_dispatch.run_satellite(FakeSatelliteAgent(), "check June 5", "thread-1")
 
@@ -887,7 +888,11 @@ class RunSatelliteTests(unittest.IsolatedAsyncioTestCase):
         saved_thread_id, saved_context = save_mock.await_args.args
         self.assertEqual(saved_thread_id, "thread-1")
         # Merged over the prior context, not replacing it.
-        self.assertEqual(saved_context["location"], "New Jersey")
+        self.assertEqual(saved_context["dataset_query"], "TEMPO_NO2")
+        # The run used a handle it never defined, so the saved place cannot
+        # vouch for it: the area is the handle alone.
+        self.assertEqual(saved_context["aoi_handle"], "aoi_cd34")
+        self.assertNotIn("location", saved_context)
         self.assertEqual(saved_context["dataset_handle"], "dataset_ab12")
         self.assertEqual(saved_context["last_time_range"], "2024-06-05/2024-06-05")
 
@@ -1499,7 +1504,8 @@ class DispatchContextTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_batchs_contexts_merge_in_request_order_and_save_once(self):
         """Later requests win a key; every chart the batch drew stays
-        nameable, in request order, as it does for one run that draws two."""
+        nameable, in request order, as it does for one run that draws two.
+        Two different places leave no area to reuse."""
         from tta_backend.services import subagent_dispatch
 
         prior_satellite = {"dataset_query": "TEMPO_NO2", "last_chart_ids": "old_chart"}
@@ -1515,7 +1521,7 @@ class DispatchContextTests(unittest.IsolatedAsyncioTestCase):
             )
 
         save_satellite.assert_awaited_once_with("thread-1", {
-            "dataset_query": "TEMPO_NO2", "location": "New York", "last_chart_ids": "nj_map,ny_map",
+            "dataset_query": "TEMPO_NO2", "last_chart_ids": "nj_map,ny_map",
         })
         save_ground.assert_awaited_once_with("thread-1", {"name": "Old", "site_id": "34-007-0002"})
 
@@ -1543,6 +1549,100 @@ class DispatchContextTests(unittest.IsolatedAsyncioTestCase):
 
         save_satellite.assert_not_called()
         save_ground.assert_not_called()
+
+
+class SatelliteAreaContextTests(unittest.IsolatedAsyncioTestCase):
+    """A saved place name and area handle must describe the same area. They
+    were captured from different calls and merged key by key, so a thread
+    could hold location "New Jersey" with California's handle, and the next
+    New Jersey request reused California (live 2026-10-18)."""
+
+    def test_a_handle_used_without_defining_it_this_run_has_no_known_place(self):
+        from tta_backend.services.subagent_dispatch import _capture_satellite_context
+
+        captured: dict[str, str] = {}
+        _capture_satellite_context("define_area_of_interest", {"location": "New Jersey"}, captured)
+        _capture_satellite_context("check_coverage", {"aoi_handle": "aoi_nj"}, captured)
+        _capture_satellite_context("safe_retrieve", {"aoi_handle": "aoi_ca"}, captured)
+
+        self.assertEqual(captured.get("aoi_handle"), "aoi_ca")
+        self.assertNotIn("location", captured)
+
+    def test_one_run_replaces_the_saved_area_as_a_pair(self):
+        from tta_backend.services.subagent_dispatch import merge_satellite_context
+
+        saved = merge_satellite_context(
+            {"location": "Delaware", "aoi_handle": "aoi_de", "dataset_query": "TEMPO"},
+            [{"location": "New Jersey", "aoi_handle": "aoi_nj"}],
+        )
+        self.assertEqual((saved["location"], saved["aoi_handle"]), ("New Jersey", "aoi_nj"))
+        self.assertEqual(saved["dataset_query"], "TEMPO")
+
+    def test_requests_over_different_areas_save_no_area(self):
+        from tta_backend.services.subagent_dispatch import merge_satellite_context
+
+        saved = merge_satellite_context(
+            {"location": "Delaware", "aoi_handle": "aoi_de"},
+            [{"location": "New Jersey", "aoi_handle": "aoi_nj"}, {"location": "California", "aoi_handle": "aoi_ca"}],
+        )
+        self.assertNotIn("location", saved)
+        self.assertNotIn("aoi_handle", saved)
+
+    def test_the_live_mismatch_cannot_be_saved(self):
+        """The live pair: one run defined New Jersey, the other used
+        California's handle with no place recorded."""
+        from tta_backend.services.subagent_dispatch import merge_satellite_context
+
+        saved = merge_satellite_context(
+            {}, [{"location": "New Jersey", "aoi_handle": "aoi_nj"}, {"aoi_handle": "aoi_ca"}],
+        )
+        self.assertNotEqual((saved.get("location"), saved.get("aoi_handle")), ("New Jersey", "aoi_ca"))
+        self.assertNotIn("aoi_handle", saved)
+
+    def test_reusing_the_saved_handle_keeps_its_place(self):
+        from tta_backend.services.subagent_dispatch import merge_satellite_context
+
+        saved = merge_satellite_context(
+            {"location": "New Jersey", "aoi_handle": "aoi_nj"}, [{"aoi_handle": "aoi_nj", "last_time_range": "t"}],
+        )
+        self.assertEqual((saved["location"], saved["aoi_handle"]), ("New Jersey", "aoi_nj"))
+
+    def test_a_new_handle_of_unknown_place_drops_the_old_place(self):
+        from tta_backend.services.subagent_dispatch import merge_satellite_context
+
+        saved = merge_satellite_context({"location": "New Jersey", "aoi_handle": "aoi_nj"}, [{"aoi_handle": "aoi_ca"}])
+        self.assertEqual(saved.get("aoi_handle"), "aoi_ca")
+        self.assertNotIn("location", saved)
+
+    def test_a_turn_that_touched_no_area_keeps_the_saved_one(self):
+        from tta_backend.services.subagent_dispatch import merge_satellite_context
+
+        saved = merge_satellite_context(
+            {"location": "New Jersey", "aoi_handle": "aoi_nj"}, [{"last_chart_ids": "map_1"}, {"last_chart_ids": "map_2"}],
+        )
+        self.assertEqual((saved["location"], saved["aoi_handle"]), ("New Jersey", "aoi_nj"))
+        self.assertEqual(saved["last_chart_ids"], "map_1,map_2")
+
+    def test_a_handle_with_no_known_place_is_never_offered(self):
+        from tta_backend.services.subagent_dispatch import _inject_satellite_context
+
+        enriched = _inject_satellite_context("Plot NO2 over New Jersey.", {"aoi_handle": "aoi_ca"})
+        self.assertNotIn("aoi_ca", enriched)
+
+    async def test_a_batch_over_two_places_saves_no_area(self):
+        from tta_backend.services import subagent_dispatch
+
+        with patch.object(subagent_dispatch, "get_satellite_context", AsyncMock(return_value={})), \
+             patch.object(subagent_dispatch, "save_satellite_context", AsyncMock()) as save:
+            await subagent_dispatch.persist_dispatch_contexts(
+                "thread-1",
+                satellite=[{"location": "New Jersey", "aoi_handle": "aoi_nj"}, {"aoi_handle": "aoi_ca"}],
+                ground=[],
+            )
+
+        saved = save.call_args.args[1]
+        self.assertNotIn("aoi_handle", saved)
+        self.assertNotIn("location", saved)
 
 
 if __name__ == "__main__":

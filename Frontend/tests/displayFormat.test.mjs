@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { formatUnits, formatScientific, formatStatValue, scaledTicks, scaledUnitsLabel, superscriptRuns, plotlySuperscript, compactDate } from '../src/utils/displayFormat.js'
+import { formatUnits, formatScientific, formatStatValue, scaledTicks, scaledUnitsLabel, superscriptRuns, plotlySuperscript, compactDateRange } from '../src/utils/displayFormat.js'
 
 test('caret exponents become superscripts', () => {
   assert.equal(formatUnits('molecules/cm^2'), 'molecules/cm²')
@@ -106,19 +106,27 @@ test('plotly text carries exponents as <sup> markup', () => {
   assert.equal(plotlySuperscript('mean (× 10¹⁵ mol m⁻²)'), 'mean (× 10<sup>15</sup> mol m<sup>-2</sup>)')
 })
 
-test('timestamps show as their calendar date', () => {
-  assert.equal(compactDate('2026-06-04T10:26:42.031514624'), '2026-06-04')
-  assert.equal(compactDate('2026-06-05T00:00:00Z'), '2026-06-05')
-  assert.equal(compactDate('2026-06-05'), '2026-06-05')
-  assert.equal(compactDate(''), '')
-  assert.equal(compactDate(null), '')
-  assert.equal(compactDate('June 2026'), 'June 2026')
-})
-
 test('ticks on a narrow range far from zero stay distinct', () => {
   const scaled = scaledTicks([101000, 101125, 101250, 101375, 101500])
   assert.equal(new Set(scaled.labels).size, 5, scaled.labels.join(' '))
   assert.equal(scaled.multiplier, '× 10⁵')
   const plain = scaledTicks([290.1, 290.3, 290.5, 290.7, 290.9])
   assert.equal(new Set(plain.labels).size, 5, plain.labels.join(' '))
+})
+
+test('a span within one day keeps its hours', () => {
+  assert.equal(compactDateRange('2026-06-05T14:00:00Z', '2026-06-05T18:30:00Z'), '2026-06-05 14:00–18:30 UTC')
+  assert.equal(compactDateRange('2026-06-05T14:00:00', '2026-06-05T14:00:00'), '2026-06-05 14:00 UTC')
+})
+
+test('a span across days, or of whole days, shows dates only', () => {
+  assert.equal(compactDateRange('2026-06-04T10:26:42.031514624', '2026-06-05T22:07:24.04'), '2026-06-04 – 2026-06-05')
+  assert.equal(compactDateRange('2026-06-05T00:00:00', '2026-06-05T23:59:59'), '2026-06-05')
+  assert.equal(compactDateRange('2026-06-05', '2026-06-05'), '2026-06-05')
+  assert.equal(compactDateRange('2026-06-05', ''), '2026-06-05')
+  assert.equal(compactDateRange('', ''), '')
+})
+
+test('the separator between two dates is the caller\'s', () => {
+  assert.equal(compactDateRange('2026-06-01', '2026-06-30', ' → '), '2026-06-01 → 2026-06-30')
 })

@@ -168,8 +168,19 @@ def dispatch_json_schema() -> dict[str, Any]:
     model: the union as a plain ``anyOf``, with the list caps. The
     discriminator (``oneOf`` + ``discriminator``) and ``extra="forbid"``
     (``additionalProperties``) were not part of that gate, so they are
-    removed here and enforced by validating against DispatchArgs instead."""
-    return cast(dict[str, Any], _gated_shape(DispatchArgs.model_json_schema()))
+    removed here and enforced by validating against DispatchArgs instead.
+
+    Each branch's ``agent`` tag is marked required. Validation picks the
+    branch by it, but the field has a default, so the schema called it
+    optional once the discriminator was gone, and a model that left it out
+    had its first call rejected."""
+    schema = cast(dict[str, Any], _gated_shape(DispatchArgs.model_json_schema()))
+    for branch in schema.get("$defs", {}).values():
+        agent = branch.get("properties", {}).get("agent")
+        if isinstance(agent, dict) and "const" in agent:
+            agent.pop("default", None)
+            branch["required"] = ["agent", *(name for name in branch.get("required", []) if name != "agent")]
+    return schema
 
 
 def _gated_shape(node: Any) -> Any:

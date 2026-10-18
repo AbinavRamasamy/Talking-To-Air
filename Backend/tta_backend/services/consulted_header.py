@@ -67,7 +67,18 @@ def result_sources(agent: str, result: AgentResult) -> list[str]:
         return []
     if agent == "ground":
         return [GROUND_SOURCE]
-    return merge_sources([d for chart in result.charts for d in _datasets(chart)]) or [SATELLITE_FALLBACK]
+    datasets = merge_sources([d for chart in result.charts for d in _datasets(chart)]) or [SATELLITE_FALLBACK]
+    return merge_sources(datasets, [GROUND_SOURCE] if _has_ground_series(result) else [])
+
+
+def _has_ground_series(result: AgentResult) -> bool:
+    """Whether a satellite run's output carries EPA AQS series:
+    validate_against_ground tags each series it draws with its source_kind."""
+    return any(
+        isinstance(series, dict) and series.get("source_kind") == "ground"
+        for artifact in result.artifacts
+        for series in artifact.metadata.get("series") or []
+    )
 
 
 def consulted_sources(tool_content: Any) -> list[str]:

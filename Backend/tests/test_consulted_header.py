@@ -70,6 +70,22 @@ class ResultSourcesTests(unittest.TestCase):
         self.assertEqual(result_sources("ground", _result("ground", 0)), ["EPA AQS"])
 
 
+    def test_a_satellite_comparison_against_monitors_names_epa_aqs_too(self):
+        """validate_against_ground fetches EPA AQS series inside a satellite
+        run; its artifacts tag each series with its source_kind."""
+        from tta_backend.models import AgentResult, ArtifactReference
+        from tta_backend.services.consulted_header import result_sources
+
+        validation = ArtifactReference.model_validate({
+            "id": "ts_1", "type": "timeseries",
+            "metadata": {"series": [
+                {"label": "NO2 (satellite)", "source_kind": "satellite"},
+                {"label": "EPA 34-013-0003", "source_kind": "ground", "station_id": "34-013-0003"},
+            ]},
+        })
+        result = AgentResult(text="x", charts=[_chart("TEMPO_NO2_L3")], artifacts=[validation])
+        self.assertEqual(result_sources("satellite", result), ["TEMPO_NO2_L3", "EPA AQS"])
+
     def test_a_run_that_failed_drew_on_no_source(self):
         """A rate-limited or crashed run is salvaged into an error answer with
         nothing produced; naming a data source above it would claim data that

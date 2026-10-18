@@ -109,10 +109,24 @@ export function plotlySuperscript(text) {
   return superscriptRuns(text).map(run => (run.sup ? `<sup>${run.text}</sup>` : run.text)).join('')
 }
 
-/** An ISO timestamp as its calendar date (`2026-06-04T10:26:42.03` → `2026-06-04`).
- * Anything that does not start with a date passes through. */
-export function compactDate(value) {
-  if (!value) return ''
-  const text = String(value)
-  return /^\d{4}-\d{2}-\d{2}(T|$)/.test(text) ? text.slice(0, 10) : text
+const ISO_START = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}):(\d{2}))?/
+
+function dateParts(value) {
+  if (!value) return null
+  const match = ISO_START.exec(String(value))
+  return match ? { date: match[1], time: match[2] == null ? null : `${match[2]}:${match[3]}` } : { date: String(value), time: null }
+}
+
+/** A start/end pair as compact text: dates for whole days or spans across
+ * days, and the hours for a span inside one day, where the date alone would
+ * make two scans of the same day read alike. */
+export function compactDateRange(start, end, separator = ' – ') {
+  const a = dateParts(start)
+  const b = dateParts(end)
+  if (!a || !b) return (a || b)?.date ?? ''
+  if (a.date !== b.date) return `${a.date}${separator}${b.date}`
+  const wholeDay = (time) => time == null || time === '00:00' || time === '23:59'
+  if (wholeDay(a.time) && wholeDay(b.time)) return a.date
+  if (a.time === b.time) return `${a.date} ${a.time} UTC`
+  return `${a.date} ${a.time ?? '00:00'}–${b.time ?? '23:59'} UTC`
 }

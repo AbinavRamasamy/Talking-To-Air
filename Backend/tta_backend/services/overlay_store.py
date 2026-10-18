@@ -14,6 +14,7 @@ from, so an evicted overlay costs resolution, never the chart.
 """
 from __future__ import annotations
 
+import io
 import logging
 import os
 import re
@@ -187,3 +188,16 @@ def _touch(path: str) -> None:
 
 def _store_root() -> str:
     return get_settings().overlay_store_dir
+
+
+def thumbnail_png(content: bytes, max_side: int) -> bytes:
+    """``content`` (a PNG) scaled down so its longer side is ``max_side``,
+    aspect kept. A chat card draws the map at 48px, and the full overlay is
+    several hundred pixels a side."""
+    from PIL import Image
+
+    with Image.open(io.BytesIO(content)) as image:
+        image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        out = io.BytesIO()
+        image.save(out, format="PNG", optimize=True)
+    return out.getvalue()

@@ -19,7 +19,7 @@ from tta_backend.datasets.qa_flags import (
     resolve_qa_info,
 )
 from tta_backend.datasets.registry import load_registry
-from tta_backend.earthdata_mcp.results import CATEGORY_VARIABLE_CHOICE_REQUIRED, MCPToolError
+from tta_backend.earthdata_mcp.results import CATEGORY_NO_DATA, CATEGORY_VARIABLE_CHOICE_REQUIRED, MCPToolError
 from tta_backend.preprocessing.variable_resolver import Resolution, resolve
 from tta_backend.services import variable_choice_registry
 from tta_backend.utils import xarray_ops
@@ -538,6 +538,16 @@ class AggregationService:
     ) -> AggregatedResult:
         if stat not in self._STAT_FUNCS:
             raise ValueError(f"Unsupported aggregation stat '{stat}'. Valid: {sorted(self._STAT_FUNCS)}")
+        # A place outside the retrieved grid selects zero cells. Every
+        # reduction below would raise on that (dask's "zero-size array"), so
+        # it is refused here as the no-data answer it is.
+        arrays = list(data.data_vars.values()) if isinstance(data, xr.Dataset) else [data]
+        if arrays and all(array.size == 0 for array in arrays):
+            raise MCPToolError(
+                CATEGORY_NO_DATA,
+                "The requested area does not overlap the retrieved data, so there is nothing to aggregate.",
+                suggestion="Retrieve data for this area, or check that the area matches the request.",
+            )
 
         # T51: one phase for the whole variable-resolve -> QA-mask -> temporal-
         # reduce chain. It's the compute that a lazily-opened bundle actually

@@ -620,6 +620,33 @@ class ChatEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"\x89PNG\r\n\x1a\nRECORDED")
 
+    async def test_chart_overlay_endpoint_serves_a_small_thumbnail_on_request(self):
+        """A chat card draws the map at 48px; the full overlay is ~600px."""
+        import io
+        import os
+
+        from PIL import Image
+
+        from tta_backend.services import overlay_store
+
+        buffer = io.BytesIO()
+        Image.new("RGBA", (600, 500), (10, 20, 30, 255)).save(buffer, format="PNG")
+        stored = overlay_store.write_overlay(buffer.getvalue())
+        payload = {
+            "chart_id": "chart-1",
+            "overlay": {"bounds": [0, 0, 1, 1], "_path": "/app/overlay_store/overlays/" + os.path.basename(stored)},
+            "user_id": self.user.id,
+        }
+
+        response = await self._get_overlay(payload, "?thumb=96")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        self.assertEqual(Image.open(io.BytesIO(response.content)).size, (96, 80))
+
+        too_big = await self._get_overlay(payload, "?thumb=5000")
+        self.assertEqual(too_big.status_code, 422)
+
     async def test_chart_overlay_endpoint_404s_once_the_overlay_is_evicted(self):
         """An evicted overlay is a normal state: the frontend falls back to
         drawing the grid in the chart payload."""

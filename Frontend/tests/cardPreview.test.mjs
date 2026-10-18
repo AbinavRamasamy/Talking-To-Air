@@ -9,7 +9,7 @@ const artifact = (data) => ({ kind: 'artifact', data })
 test('a map previews its own server-rendered image', () => {
   const preview = cardPreview(chart({ type: 'heatmap', overlay: { url: '/chart/map_1/overlay.png' } }))
   assert.equal(preview.kind, 'map')
-  assert.equal(preview.overlayUrl, '/chart/map_1/overlay.png')
+  assert.equal(preview.overlayUrl, '/chart/map_1/overlay.png?thumb=96')
 })
 
 test('a comparison previews its first panel', () => {
@@ -18,7 +18,7 @@ test('a comparison previews its first panel', () => {
     panels: [{ overlay: { url: '/chart/a/overlay.png' } }, { overlay: { url: '/chart/b/overlay.png' } }],
   }))
   assert.equal(preview.kind, 'map')
-  assert.equal(preview.overlayUrl, '/chart/a/overlay.png')
+  assert.equal(preview.overlayUrl, '/chart/a/overlay.png?thumb=96')
 })
 
 test('a map with no image falls back to the map icon', () => {
@@ -71,4 +71,15 @@ test('a bottom-up profile puts the last layer at the top', () => {
 
 test('a reversed axis (pressure, or a top-down index) puts the first level at the top', () => {
   assert.equal(profilePath([0, 10], [0, 1], { width: 20, height: 20, pad: 0, reversed: true }), 'M0 0 L20 20')
+})
+
+test('a map preview asks the server for a small thumbnail', () => {
+  assert.equal(
+    cardPreview(chart({ type: 'heatmap', overlay: { url: '/chart/map_1/overlay.png' } })).overlayUrl,
+    '/chart/map_1/overlay.png?thumb=96',
+  )
+  assert.equal(
+    cardPreview(chart({ type: 'heatmap_multi', panels: [{ overlay: { url: '/chart/c/overlay.png?panel=0' } }] })).overlayUrl,
+    '/chart/c/overlay.png?panel=0&thumb=96',
+  )
 })
