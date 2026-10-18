@@ -164,7 +164,7 @@ async def execute_dispatch(requests: list[AgentRequest], run_one: RunOne) -> Dis
         DispatchItemResult(
             index=index, agent=request.agent, intent=request.intent,
             status=status if owners.get(key) == index else "duplicate", result=result,
-            sources=result_sources(request.agent, result),
+            sources=[] if status == "error" else result_sources(request.agent, result),
         )
         for index, (key, request, (status, result)) in enumerate(zip(keys, requests, outcomes, strict=True))
     ])

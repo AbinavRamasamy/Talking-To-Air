@@ -7,8 +7,9 @@ claim a dataset or ground check that did not happen; any header the model
 writes itself is dropped.
 
 A satellite run is named by the datasets its charts were drawn from; a ground
-run is EPA AQS. Each dispatch item records its sources when it runs, because
-the checkpointed copy keeps only chart references and loses the dataset.
+run is EPA AQS; a run that failed draws on nothing. Each dispatch item records
+its sources when it runs, because the checkpointed copy keeps only chart
+references and loses the dataset.
 """
 from __future__ import annotations
 
@@ -18,20 +19,28 @@ from typing import Any
 from tta_backend.models import AgentResult, parse_dispatch_result
 
 _HEADER_PREFIX = "Data sources:"
-# The current header, and the "Agent consulted:" one written before it.
-_HEADER_LINE = re.compile(r"^[ \t]*(?:Data sources|Agent consulted):[^\n]*\n?", re.MULTILINE)
+# The pre-rename header. A model imitating it may restate raw data above it,
+# so everything above the last one is dropped.
+_LEGACY_HEADER_LINE = re.compile(r"^[ \t]*Agent consulted:[^\n]*\n?", re.MULTILINE)
+# A header at the very start of the text: the server's own, or a model's copy.
+_LEADING_HEADER = re.compile(r"\A[ \t]*(?:Data sources|Agent consulted):[^\n]*(?:\n|\Z)")
+# A model's closing "Data sources" line, which would repeat the header.
+_TRAILING_SOURCES = re.compile(r"\n[ \t]*Data sources:[^\n]*\s*\Z")
 _RAN = ("ok", "error", "duplicate")
 
 GROUND_SOURCE = "EPA AQS"
 SATELLITE_FALLBACK = "NASA Earthdata"
 
 
+def _field(obj: Any, name: str) -> Any:
+    """``name`` off a ChartPayload (extras are attributes) or a plain dict,
+    read in place: a chart carries its whole grid, so it is never dumped."""
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
 def _datasets(chart: Any) -> list[str]:
-    payload = chart.model_dump() if hasattr(chart, "model_dump") else chart
-    if not isinstance(payload, dict):
-        return []
-    provenances = [payload.get("provenance")]
-    provenances += [panel.get("provenance") for panel in payload.get("panels") or [] if isinstance(panel, dict)]
+    provenances = [_field(chart, "provenance")]
+    provenances += [_field(panel, "provenance") for panel in _field(chart, "panels") or []]
     return [p["dataset"] for p in provenances if isinstance(p, dict) and isinstance(p.get("dataset"), str) and p["dataset"]]
 
 
@@ -45,8 +54,17 @@ def merge_sources(*groups: list[str]) -> list[str]:
     return [s for s in seen if s != GROUND_SOURCE] + ([GROUND_SOURCE] if GROUND_SOURCE in seen else [])
 
 
+def _failed(result: AgentResult) -> bool:
+    """A run salvaged into an error answer with nothing produced: a
+    rate-limited or crashed sub-agent comes back this way, not as an error."""
+    produced = bool(result.charts or result.artifacts)
+    return not produced and bool(result.metadata.get("salvaged") or result.metadata.get("error"))
+
+
 def result_sources(agent: str, result: AgentResult) -> list[str]:
-    """The sources one sub-agent run drew on."""
+    """The sources one sub-agent run drew on; none when it failed."""
+    if _failed(result):
+        return []
     if agent == "ground":
         return [GROUND_SOURCE]
     return merge_sources([d for chart in result.charts for d in _datasets(chart)]) or [SATELLITE_FALLBACK]
@@ -61,7 +79,8 @@ def consulted_sources(tool_content: Any) -> list[str]:
     if batch is None:
         return []
     return merge_sources(*(
-        item.sources or ([GROUND_SOURCE] if item.agent == "ground" else [SATELLITE_FALLBACK])
+        item.sources if item.sources is not None
+        else [GROUND_SOURCE] if item.agent == "ground" else [SATELLITE_FALLBACK]
         for item in batch.results if item.status in _RAN
     ))
 
@@ -71,14 +90,18 @@ def sources_header(sources: list[str]) -> str | None:
 
 
 def with_sources_header(text: str, sources: list[str]) -> str:
-    """``text`` opened by the header for ``sources``. Any header line already
-    in the text goes, and so does everything above the last one that opens
-    more text: a model that writes before its own header restates raw data
-    ahead of the answer, and on the live stream the server's header precedes
-    it. A header line with nothing after it is only dropped, so a model's
-    closing "Data sources" line cannot swallow its answer."""
-    openers = [m for m in _HEADER_LINE.finditer(text) if text[m.end():].strip()]
-    body = text[openers[-1].end():] if openers else text
-    body = _HEADER_LINE.sub("", body).strip()
+    """``text`` opened by the header for ``sources``.
+
+    Dropped from ``text``: any header line it opens with (on the live stream
+    the server's header precedes the answer); everything above the last
+    legacy "Agent consulted" line, where a model imitating that header
+    restated raw data first; and a closing "Data sources" line. A "Data
+    sources" line inside the answer stays: models cite that way, and treating
+    it as a header would cut the text above it."""
+    legacy = list(_LEGACY_HEADER_LINE.finditer(text))
+    body = (text[legacy[-1].end():] if legacy else text).strip()
+    while (leading := _LEADING_HEADER.match(body)) is not None:
+        body = body[leading.end():].lstrip()
+    body = _TRAILING_SOURCES.sub("", body).strip()
     header = sources_header(sources)
     return f"{header}\n\n{body}" if header else body

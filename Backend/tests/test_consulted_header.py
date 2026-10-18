@@ -16,6 +16,12 @@ def _result(agent, i, datasets=()):
     return AgentResult(text=f"{agent} {i}", charts=[_chart(d) for d in datasets])
 
 
+def _result_with(charts):
+    from tta_backend.models import AgentResult
+
+    return AgentResult(text="x", charts=charts)
+
+
 def _batch(*items):
     """Each item is (agent, status) or (agent, status, datasets plotted). The
     datasets are recorded as the item's sources, as the executor records
@@ -62,6 +68,38 @@ class ResultSourcesTests(unittest.TestCase):
         from tta_backend.services.consulted_header import result_sources
 
         self.assertEqual(result_sources("ground", _result("ground", 0)), ["EPA AQS"])
+
+
+    def test_a_run_that_failed_drew_on_no_source(self):
+        """A rate-limited or crashed run is salvaged into an error answer with
+        nothing produced; naming a data source above it would claim data that
+        was never retrieved."""
+        from tta_backend.models import AgentResult
+        from tta_backend.services.consulted_header import result_sources
+
+        for metadata in ({"salvaged": True}, {"error": "invalid_envelope"}):
+            with self.subTest(metadata=metadata):
+                self.assertEqual(result_sources("satellite", AgentResult(text="rate-limited", metadata=metadata)), [])
+                self.assertEqual(result_sources("ground", AgentResult(text="rate-limited", metadata=metadata)), [])
+
+    def test_a_salvaged_run_that_still_produced_output_keeps_its_sources(self):
+        from tta_backend.models import AgentResult
+        from tta_backend.services.consulted_header import result_sources
+
+        result = AgentResult(text="prose", charts=[_chart("TEMPO_NO2_L3")], metadata={"salvaged": True})
+        self.assertEqual(result_sources("satellite", result), ["TEMPO_NO2_L3"])
+
+    def test_provenance_is_read_without_copying_the_chart(self):
+        """A heatmap carries its whole grid; dumping it to read one dict
+        copies every value on the dispatch path."""
+        from unittest.mock import patch
+
+        from tta_backend.models import ChartPayload
+        from tta_backend.services.consulted_header import result_sources
+
+        chart = _chart("TEMPO_NO2_L3")
+        with patch.object(ChartPayload, "model_dump", side_effect=AssertionError("model_dump called")):
+            self.assertEqual(result_sources("satellite", _result_with([chart])), ["TEMPO_NO2_L3"])
 
 
 class ConsultedSourcesTests(unittest.TestCase):
@@ -140,6 +178,17 @@ class SourcesHeaderTests(unittest.TestCase):
                     with_sources_header(text, ["TEMPO_NO2_L3"]),
                     "Data sources: TEMPO_NO2_L3\n\nNO2 peaked near Newark.",
                 )
+
+    def test_a_sources_line_inside_the_answer_does_not_drop_the_text_above_it(self):
+        """Models cite with "Data sources:" mid-answer; only a leading header,
+        or the legacy "Agent consulted" marker, may cut text above it."""
+        from tta_backend.services.consulted_header import with_sources_header
+
+        text = "NO2 peaked near Newark.\nData sources: TEMPO NO2 and EPA AQS.\nOzone stayed below 70 ppb."
+        self.assertEqual(
+            with_sources_header(text, ["TEMPO_NO2_L3"]),
+            "Data sources: TEMPO_NO2_L3\n\n" + text,
+        )
 
     def test_a_sources_line_the_model_writes_at_the_end_does_not_swallow_the_answer(self):
         from tta_backend.services.consulted_header import with_sources_header
@@ -278,6 +327,33 @@ class DispatchExecutorSourcesTests(unittest.IsolatedAsyncioTestCase):
         batch = await execute_dispatch(requests, run_one)
 
         self.assertEqual([item.sources for item in batch.results], [["TEMPO_NO2_L3"], ["EPA AQS"]])
+
+    async def test_a_run_that_raised_records_no_source(self):
+        from tta_backend.models import SatelliteRequest
+        from tta_backend.services.dispatch_executor import execute_dispatch
+
+        async def run_one(request):
+            raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+        request = SatelliteRequest.model_validate({"intent": "visualize", "variable": "NO2", "location": "Newark"})
+        batch = await execute_dispatch([request], run_one)
+
+        self.assertEqual((batch.results[0].status, batch.results[0].sources), ("error", []))
+
+    async def test_a_turn_whose_runs_all_failed_carries_no_header(self):
+        from tta_backend.models import AgentResult, DispatchItemResult, DispatchResult
+
+        failed = DispatchResult(results=[DispatchItemResult(
+            index=0, agent="satellite", intent="visualize", status="ok",
+            result=AgentResult(text="rate-limited"), sources=[],
+        )]).model_dump_json(exclude_none=True)
+        texts, response = await SupervisorStreamHeaderTests._stream(
+            self,
+            ("tool_call", {"name": "dispatch", "args": {}}),
+            ("tool_result", {"name": "dispatch", "content": failed}),
+            ("text", "The request was rate-limited."),
+        )
+        self.assertEqual(response, "The request was rate-limited.")
 
 
 if __name__ == "__main__":
