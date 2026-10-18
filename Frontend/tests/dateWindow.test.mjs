@@ -1,9 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 
 import {
-  parseWindow, windowString, windowError, cmrTemporal, windowPhrase, requestWindow,
+  parseWindow, windowString, windowError, cmrTemporal, windowPhrase,
 } from '../src/utils/dateWindow.js'
 
 test('a range is written as start/end, the form the discovery endpoints take', () => {
@@ -49,23 +48,4 @@ test('the retrieve request reads naturally for a day and for a range', () => {
   assert.equal(windowPhrase('2026-06-05/2026-06-05'), 'on 2026-06-05')
   assert.equal(windowPhrase('2026-06-01/2026-06-30'), 'from 2026-06-01 to 2026-06-30')
   assert.equal(windowPhrase(''), '')
-})
-
-test('a day sent to coverage or granules spans the whole day', () => {
-  // A bare `day/day` reaches CMR as midnight to midnight — an instant — and
-  // matches no granule, so a single day must carry its clock times.
-  assert.equal(requestWindow('2026-06-05/2026-06-05'), '2026-06-05T00:00:00Z/2026-06-05T23:59:59Z')
-  assert.equal(requestWindow('2026-06-01/2026-06-30'), '2026-06-01T00:00:00Z/2026-06-30T23:59:59Z')
-  assert.equal(requestWindow(''), '')
-  assert.equal(requestWindow('2026-06-30/2026-06-01'), '')
-})
-
-test('coverage and granules send whole-day windows; quick-look sends the day', () => {
-  // Quick-look shows one moment of the day, and the MCP reads an explicit
-  // clock time as that moment: a widened window would show 00:00Z, night.
-  const source = readFileSync(new URL('../src/hooks/useDiscovery.js', import.meta.url), 'utf8')
-  const bodies = source.match(/time_range:\s*[^,}\n]+/g) ?? []
-  assert.equal(bodies.length, 3, 'preview, coverage, and granules each send a time_range')
-  assert.match(bodies[0], /timeRange\.trim\(\)/)
-  for (const body of bodies.slice(1)) assert.match(body, /requestWindow\(timeRange\)/)
 })

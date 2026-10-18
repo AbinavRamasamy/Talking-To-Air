@@ -49,8 +49,6 @@ export function statsForStop(chart, stop, statistic = 'mean') {
     basis: 'analyzed-region',
     count,
     validPct: (stop.validFraction ?? 0) * 100,
-    // The frame stack divides by the region's own area (D5a).
-    validBasis: 'region',
     qaPassRate: stop.qaPassRate,
     scope: stop.label,
     state: stop.state,

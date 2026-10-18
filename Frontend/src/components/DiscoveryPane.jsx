@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import VariableInventory from './VariableInventory'
 import { parseWindow, windowError, windowString } from '../utils/dateWindow.js'
 import { debounce } from '../utils/latestRequest.js'
-import { quickLookView } from '../utils/quickLook.js'
 
 const fieldStyle = {
   minWidth: 0, height: '28px', fontSize: '11px', padding: '0 8px',
@@ -129,8 +128,6 @@ function DatasetCard({ dataset, location, timeRange, preview, coverage, granules
   // defaulting to "now". Gate it the same way checkCoverage/inspectGranules
   // already require an area + window before calling out.
   const canRetrieve = location.trim() && timeRange.trim()
-  const [failedImage, setFailedImage] = useState(null)
-  const quickLook = quickLookView(preview, failedImage)
 
   return (
     <div style={{
@@ -215,27 +212,23 @@ function DatasetCard({ dataset, location, timeRange, preview, coverage, granules
         </button>
       </div>
 
-      {quickLook?.kind === 'loading' && (
-        <div style={{ fontSize: '11px', color: 'var(--text-hint)' }}>{quickLook.text}</div>
+      {preview?.loading && (
+        <div style={{ fontSize: '11px', color: 'var(--text-hint)' }}>Loading quick-look…</div>
       )}
-      {quickLook?.kind === 'error' && (
-        <div style={{ fontSize: '11px', color: 'var(--error)' }}>{quickLook.text}</div>
+      {preview?.error && (
+        <div style={{ fontSize: '11px', color: 'var(--error)' }}>{preview.error}</div>
       )}
-      {quickLook?.kind === 'none' && (
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>{quickLook.text}</div>
+      {preview && !preview.loading && !preview.error && preview.has_gibs_layer === false && (
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+          {preview.message || 'No browse layer available for this dataset.'}
+        </div>
       )}
-      {quickLook?.kind === 'image' && (
-        <figure style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '3px' }}>
-          <img
-            src={quickLook.url}
-            alt={`Quick-look of ${dataset.summary || handle}`}
-            onError={() => setFailedImage(quickLook.url)}
-            style={{ width: '100%', borderRadius: '6px', border: '1px solid var(--border)' }}
-          />
-          <figcaption style={{ fontSize: '10px', color: 'var(--text-hint)', overflowWrap: 'anywhere' }}>
-            {quickLook.caption}
-          </figcaption>
-        </figure>
+      {preview && !preview.loading && !preview.error && preview.gibs_url && (
+        <img
+          src={preview.gibs_url}
+          alt={`GIBS quick-look for ${handle}`}
+          style={{ width: '100%', borderRadius: '6px', border: '1px solid var(--border)' }}
+        />
       )}
 
       {coverage?.loading && (
