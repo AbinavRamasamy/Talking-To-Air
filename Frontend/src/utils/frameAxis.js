@@ -71,35 +71,50 @@ const CADENCE_UNITS = {
 }
 const NUMBER_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
 
-// How many of the axis's intervals hold usable observations, over the span
-// they cover: "Hourly observations are available for 13 of 24 hours
-// (05 Jun 00:00–24:00 UTC)." Counted off the intervals themselves, not the
-// granule count, which differs whenever two scans share an hour, and not a
-// fixed day, since the axis can span part of one or several. An interval
-// whose data all failed QA is not available, and is disclosed separately.
+// How many granules hold usable observations and how many of the axis's
+// intervals they fall in, over the span covered: "14 hourly granules hold
+// data, across 13 of 24 hours (05 Jun 00:00–24:00 UTC)." Both counts, because
+// the map's title counts granules and two scans can share an hour; the hours
+// alone read as a contradiction of the title. The span is the axis's own, not
+// a fixed day, since it can cover part of one or several. An interval whose
+// data all failed QA is not available, and is disclosed separately.
 export function coverageSentence(axis) {
   const intervals = axis?.stops?.filter(stop => stop.kind === 'interval') ?? []
   const total = intervals.length
   if (!total) return null
-  const observed = intervals.filter(stop => stop.state === 'observed').length
+  const observedStops = intervals.filter(stop => stop.state === 'observed')
+  const observed = observedStops.length
   const rejected = intervals.filter(stop => stop.state === 'qa-rejected').length
   const unit = CADENCE_UNITS[axis.cadence]
   const per = axis.bucketsPerFrame
   const blocks = axis.coarsened
   const count = (n, one, many) => `${n} ${n === 1 ? one : many}`
+  const granules = observedStops.every(stop => Number.isFinite(stop.nGranules))
+    ? observedStops.reduce((sum, stop) => sum + stop.nGranules, 0)
+    : null
 
-  let lead
+  let slots
   let rejectedUnit
   if (!unit) {
-    lead = `Observations are available for ${observed} of ${count(total, 'interval', 'intervals')}`
+    slots = count(total, 'interval', 'intervals')
     rejectedUnit = ['interval', 'intervals']
   } else if (blocks) {
     const width = Number.isInteger(per) && per > 1 && per < NUMBER_WORDS.length ? `${NUMBER_WORDS[per]}-${unit.one} ` : ''
-    lead = `${unit.adjective} observations are available in ${observed} of ${count(total, `${width}block`, `${width}blocks`)}`
+    slots = count(total, `${width}block`, `${width}blocks`)
     rejectedUnit = ['block', 'blocks']
   } else {
-    lead = `${unit.adjective} observations are available for ${observed} of ${count(total, unit.one, unit.many)}`
+    slots = count(total, unit.one, unit.many)
     rejectedUnit = [unit.one, unit.many]
+  }
+
+  let lead
+  if (granules !== null) {
+    const noun = unit ? `${unit.adjective.toLowerCase()} granule` : 'granule'
+    lead = `${granules} ${noun}${granules === 1 ? ' holds' : 's hold'} data, across ${observed} of ${slots}`
+  } else if (!unit) {
+    lead = `Observations are available for ${observed} of ${slots}`
+  } else {
+    lead = `${unit.adjective} observations are available ${blocks ? 'in' : 'for'} ${observed} of ${slots}`
   }
   const span = unit ? spanLabel(intervals[0].tStart, intervals[total - 1].tEnd, unit) : null
   const sentence = span ? `${lead} (${span}).` : `${lead}.`

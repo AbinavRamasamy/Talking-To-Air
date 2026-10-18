@@ -11,6 +11,7 @@ import { resolveFrameState } from '../utils/frameAxis.js'
 import { resolveScrubberScale } from '../utils/frameScale.js'
 import { resolveFrameDelta } from '../utils/frameDelta.js'
 import { statsForStop, formatFrameQaRate } from '../utils/frameStats.js'
+import { validValuesNote } from '../utils/chartStats.js'
 import {
   extentOverstatementNote, resolveScrubStop, resolveStatisticChoice, resolveStatisticSource,
 } from '../utils/frameStatistic.js'
@@ -286,7 +287,7 @@ function qaPassRateCard(masking) {
     if (checked === 0) return { value: '—', subtitle: 'No retrievable pixels to check' }
     return { value: 'Not applied', subtitle: masking.qaStatus }
   }
-  const parts = [`of ${checked?.toLocaleString() ?? '—'} checked pixels`]
+  const parts = [`of ${checked?.toLocaleString() ?? '—'} retrieved pixels passed the quality flag`]
   if (masking.qaFlagMissingPixels) {
     parts.push(`${masking.qaFlagMissingPixels.toLocaleString()} had no usable flag`)
   }
@@ -302,12 +303,7 @@ function framePassRateCard(stop) {
   return { value: rate, subtitle: 'of the checkable area in this interval' }
 }
 
-// What extent each figure was counted over, keyed by computeChartStats' basis.
-const VALID_BASIS = {
-  'analyzed-region': 'finite cells in the analyzed region',
-  'rendered-grid': 'finite cells in the rendered grid',
-  series: 'time steps carrying a value',
-}
+// What extent each count was counted over, keyed by computeChartStats' basis.
 const COUNT_BASIS = {
   'analyzed-region': 'observations in the analyzed region',
   'rendered-grid': 'cells in the rendered grid, not observations',
@@ -362,7 +358,7 @@ function StatisticsTab({ chart, stop, statistic = 'mean' }) {
             basis is not fixed: statistics computed server-side describe the
             analyzed region, while an artifact predating that field can only be
             recomputed from the thinned grid it shipped. */}
-        <StatCard label="Valid values" value={`${stats.validPct.toFixed(1)}%`} subtitle={VALID_BASIS[stats.basis] || VALID_BASIS['rendered-grid']} />
+        <StatCard label="Valid values" value={`${stats.validPct.toFixed(1)}%`} subtitle={validValuesNote(stats)} />
         {passRate && <StatCard label="QA pass rate" value={passRate.value} subtitle={passRate.subtitle} />}
         <StatCard label="Sample count" value={stats.count.toLocaleString()} subtitle={COUNT_BASIS[stats.basis] || COUNT_BASIS['rendered-grid']} />
       </div>
