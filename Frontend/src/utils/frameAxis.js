@@ -58,7 +58,80 @@ export function buildScrubAxis(chart) {
     //: whose tier field went missing.
     coarsened,
     cellsPerFrame: Number.isFinite(block.cells_per_frame) ? block.cells_per_frame : null,
+    bucketsPerFrame: Number.isFinite(block.buckets_per_frame) ? block.buckets_per_frame : null,
   }
+}
+
+const CADENCE_UNITS = {
+  hourly: { adjective: 'Hourly', one: 'hour', many: 'hours', clock: true },
+  sub_hourly: { adjective: 'Sub-hourly', one: 'interval', many: 'intervals', clock: true },
+  'sub-hourly': { adjective: 'Sub-hourly', one: 'interval', many: 'intervals', clock: true },
+  daily: { adjective: 'Daily', one: 'day', many: 'days' },
+  monthly: { adjective: 'Monthly', one: 'month', many: 'months' },
+}
+const NUMBER_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
+
+// How many of the axis's intervals hold usable observations, over the span
+// they cover: "Hourly observations are available for 13 of 24 hours
+// (05 Jun 00:00–24:00 UTC)." Counted off the intervals themselves, not the
+// granule count, which differs whenever two scans share an hour, and not a
+// fixed day, since the axis can span part of one or several. An interval
+// whose data all failed QA is not available, and is disclosed separately.
+export function coverageSentence(axis) {
+  const intervals = axis?.stops?.filter(stop => stop.kind === 'interval') ?? []
+  const total = intervals.length
+  if (!total) return null
+  const observed = intervals.filter(stop => stop.state === 'observed').length
+  const rejected = intervals.filter(stop => stop.state === 'qa-rejected').length
+  const unit = CADENCE_UNITS[axis.cadence]
+  const per = axis.bucketsPerFrame
+  const blocks = axis.coarsened
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`
+
+  let lead
+  let rejectedUnit
+  if (!unit) {
+    lead = `Observations are available for ${observed} of ${count(total, 'interval', 'intervals')}`
+    rejectedUnit = ['interval', 'intervals']
+  } else if (blocks) {
+    const width = Number.isInteger(per) && per > 1 && per < NUMBER_WORDS.length ? `${NUMBER_WORDS[per]}-${unit.one} ` : ''
+    lead = `${unit.adjective} observations are available in ${observed} of ${count(total, `${width}block`, `${width}blocks`)}`
+    rejectedUnit = ['block', 'blocks']
+  } else {
+    lead = `${unit.adjective} observations are available for ${observed} of ${count(total, unit.one, unit.many)}`
+    rejectedUnit = [unit.one, unit.many]
+  }
+  const span = unit ? spanLabel(intervals[0].tStart, intervals[total - 1].tEnd, unit) : null
+  const sentence = span ? `${lead} (${span}).` : `${lead}.`
+  if (!rejected) return sentence
+  return `${sentence} ${count(rejected, `more ${rejectedUnit[0]}`, `more ${rejectedUnit[1]}`)} had data that failed quality checks.`
+}
+
+// The time the intervals cover, `end` exclusive as the frames carry it.
+function spanLabel(start, end, unit) {
+  const from = parseUtc(start)
+  const until = parseUtc(end)
+  if (!from || !until) return null
+  if (unit.clock) {
+    const lastMoment = new Date(until.getTime() - 1)
+    if (dayOf(from) !== dayOf(lastMoment)) {
+      return `${dayOf(from)} ${timeOf(from)} – ${dayOf(until)} ${timeOf(until)} UTC`
+    }
+    const close = dayOf(until) === dayOf(from) ? timeOf(until) : '24:00'
+    return `${dayOf(from)} ${timeOf(from)}–${close} UTC`
+  }
+  if (unit.one === 'month') {
+    const last = new Date(Date.UTC(until.getUTCFullYear(), until.getUTCMonth() - 1, 1))
+    const monthOf = (at) => `${MONTHS[at.getUTCMonth()]} ${at.getUTCFullYear()}`
+    return monthOf(from) === monthOf(last) ? monthOf(from) : `${monthOf(from)} – ${monthOf(last)}`
+  }
+  const last = new Date(until.getTime() - 86_400_000)
+  if (dayOf(from) === dayOf(last) && from.getUTCFullYear() === last.getUTCFullYear()) {
+    return `${dayOf(from)} ${from.getUTCFullYear()}`
+  }
+  return from.getUTCFullYear() === last.getUTCFullYear()
+    ? `${dayOf(from)} – ${dayOf(last)} ${last.getUTCFullYear()}`
+    : `${dayOf(from)} ${from.getUTCFullYear()} – ${dayOf(last)} ${last.getUTCFullYear()}`
 }
 
 // D10's three-way read of a bucket. `{count: 0}` alone is what a frame carries
