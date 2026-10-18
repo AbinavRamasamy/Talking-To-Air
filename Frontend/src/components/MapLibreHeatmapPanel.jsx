@@ -380,10 +380,15 @@ export default function MapLibreHeatmapPanel({ payload, height = 420, colorScale
           {title}
         </div>
       )}
-      <div style={{ position: 'relative', width: '100%', height, borderRadius: '8px', overflow: 'hidden' }}>
-        <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      {/* `height` covers the map AND its legend, so a caller that sized the
+          panel to an exact box (FittedMap, compare tiles) keeps it in that box:
+          the map takes whatever the legend leaves. */}
+      <div style={{ height, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0, borderRadius: '8px', overflow: 'hidden' }}>
+          <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+        </div>
+        {!hideLegend && <MapColorbar gradientStops={gradientStops} ticks={ticks} units={units} clipNote={clipNote} />}
       </div>
-      {!hideLegend && <MapColorbar gradientStops={gradientStops} ticks={ticks} units={units} clipNote={clipNote} />}
     </div>
   )
 }
@@ -396,7 +401,7 @@ function MapColorbar({ gradientStops, ticks, units, clipNote }) {
   const { labels, multiplier } = scaledTicks(ticks.map(tick => tick.value))
   const unitsLabel = scaledUnitsLabel(multiplier, units)
   return (
-    <div style={{ marginTop: '10px', maxWidth: '440px' }}>
+    <div style={{ marginTop: '10px', maxWidth: '440px', flexShrink: 0 }}>
       <svg viewBox="0 0 100 10" preserveAspectRatio="none" style={{ display: 'block', width: '100%', height: 14 }}>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">

@@ -29,6 +29,13 @@ test('a hyphenated word is not read as an exponent', () => {
   assert.equal(formatUnits('PM2.5'), 'PM2.5')
 })
 
+test('a chemical formula in a units string keeps its subscript digits', () => {
+  assert.equal(formatUnits('NO2 ppb'), 'NO2 ppb')
+  assert.equal(formatUnits('mol O3 / m^2'), 'mol O3 / m²')
+  assert.equal(formatUnits('molecules NO2 cm-2'), 'molecules NO2 cm⁻²')
+  assert.equal(formatUnits('ug CO2 m-3'), 'ug CO2 m⁻³')
+})
+
 test('large and small magnitudes use ×10 with a superscript exponent', () => {
   assert.equal(formatScientific(1.406e15), '1.406 × 10¹⁵')
   assert.equal(formatScientific(-1.897e14), '−1.897 × 10¹⁴')
@@ -106,4 +113,12 @@ test('timestamps show as their calendar date', () => {
   assert.equal(compactDate(''), '')
   assert.equal(compactDate(null), '')
   assert.equal(compactDate('June 2026'), 'June 2026')
+})
+
+test('ticks on a narrow range far from zero stay distinct', () => {
+  const scaled = scaledTicks([101000, 101125, 101250, 101375, 101500])
+  assert.equal(new Set(scaled.labels).size, 5, scaled.labels.join(' '))
+  assert.equal(scaled.multiplier, '× 10⁵')
+  const plain = scaledTicks([290.1, 290.3, 290.5, 290.7, 290.9])
+  assert.equal(new Set(plain.labels).size, 5, plain.labels.join(' '))
 })

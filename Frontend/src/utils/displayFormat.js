@@ -14,14 +14,24 @@ function superscript(exponent) {
   return [...String(exponent)].map(ch => SUPERSCRIPT[ch] ?? ch).join('')
 }
 
+// Unit symbols a CF-style exponent can follow (`cm-2`, `m3`, `s-1`). Only
+// these take a superscript: a units string may also name the species, and the
+// digits in `NO2` or `O3` are a formula's subscripts, not exponents.
+const UNIT_SYMBOLS = new Set([
+  'm', 'cm', 'mm', 'km', 's', 'h', 'g', 'kg', 'mg', 'ug', 'µg', 'μg',
+  'mol', 'molec', 'molecules', 'sr', 'Pa', 'hPa', 'K', 'W', 'J', 'L', 'Hz', 'N',
+])
+
 /** `cm^2`, `m^-2` and CF-style `cm-2`, `m3` written with superscript
- * exponents. A digit run counts as an exponent only right after a letter
- * and not followed by more of a word or a decimal point, so `PM2.5` stays. */
+ * exponents. A bare digit run is an exponent only on a unit symbol, and not
+ * when more of a word or a decimal point follows, so `PM2.5` and `NO2` stay. */
 export function formatUnits(units) {
   if (units == null) return ''
   return String(units)
     .replace(/\^(-?\d+)/g, (_, exp) => superscript(exp))
-    .replace(/([A-Za-zµμ])(-?\d+)(?![\w.])/g, (_, unit, exp) => unit + superscript(exp))
+    .replace(/(?<![A-Za-zµμ])([A-Za-zµμ]+)(-?\d+)(?![\w.])/g, (match, unit, exp) => (
+      UNIT_SYMBOLS.has(unit) ? unit + superscript(exp) : match
+    ))
 }
 
 /** `n` with `digits` mantissa decimals as `m × 10ⁿ` when it is very large or
@@ -46,19 +56,28 @@ export function formatStatValue(n, units) {
 
 /** Colorbar tick labels sharing one power of ten, so long labels like
  * 4.5 × 10¹⁴ do not crowd a narrow bar. `multiplier` names that power once
- * (empty for ordinary magnitudes) and belongs beside the units. */
+ * (empty for ordinary magnitudes) and belongs beside the units. Labels take
+ * the fewest significant figures that keep every tick distinct, so a narrow
+ * range far from zero (101000–101500 Pa) does not read as five 1s. */
 export function scaledTicks(values) {
   const finite = values.filter(v => typeof v === 'number' && Number.isFinite(v))
   const maxAbs = Math.max(0, ...finite.map(Math.abs))
   const needsScale = maxAbs !== 0 && (maxAbs < 1e-3 || maxAbs >= 1e4)
   const exponent = needsScale ? Math.floor(Math.log10(maxAbs)) : 0
-  const label = (v) => {
+  const labelsAt = (precision) => values.map((v) => {
     if (typeof v !== 'number' || !Number.isFinite(v)) return '—'
     const scaled = needsScale ? v / 10 ** exponent : v
-    return String(Number(scaled.toPrecision(needsScale ? 2 : 3))).replace('-', MINUS)
+    return String(Number(scaled.toPrecision(precision))).replace('-', MINUS)
+  })
+  const distinct = new Set(finite).size
+  let precision = needsScale ? 2 : 3
+  let labels = labelsAt(precision)
+  while (precision < 6 && new Set(labels.filter(l => l !== '—')).size < distinct) {
+    precision += 1
+    labels = labelsAt(precision)
   }
   return {
-    labels: values.map(label),
+    labels,
     multiplier: needsScale ? `× 10${superscript(exponent)}` : '',
   }
 }

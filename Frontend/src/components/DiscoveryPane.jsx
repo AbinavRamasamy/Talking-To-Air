@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import VariableInventory from './VariableInventory'
 import { parseWindow, windowError, windowString } from '../utils/dateWindow.js'
+import { debounce } from '../utils/latestRequest.js'
 
 const fieldStyle = {
   minWidth: 0, height: '28px', fontSize: '11px', padding: '0 8px',
@@ -287,6 +288,11 @@ export default function DiscoveryPane({
   previews, coverages, granules, inventories,
   onSearch, onPreview, onCoverage, onGranules, onInspect, onRetrieve,
 }) {
+  // Each call hands over the onSearch of its own render, so the run that
+  // fires uses the latest query rather than the one current at creation.
+  const [researchForWindow] = useState(() => debounce((windowValue, search) => search(windowValue), 400))
+  useEffect(() => () => researchForWindow.cancel(), [researchForWindow])
+
   return (
     <div style={{
       flex:          1,
@@ -340,8 +346,9 @@ export default function DiscoveryPane({
           value={timeRange}
           onChange={(next) => {
             setTimeRange(next)
-            // Picking dates filters the results already on screen.
-            if (query.trim() && results.length > 0) onSearch(next)
+            // Picking dates filters the results already on screen. Debounced:
+            // typing a year emits a valid date per keystroke.
+            if (query.trim() && results.length > 0) researchForWindow(next, onSearch)
           }}
         />
         <div style={{ fontSize: '10px', color: 'var(--text-hint)', marginTop: '4px' }}>

@@ -1060,7 +1060,7 @@ export default function OutputPanel({
           <>
             <MapLibreHeatmapPanel
               payload={chart}
-              height={480}
+              height={560}
               colorScaleOverride={scrubScale}
               frame={activeFrame}
             />

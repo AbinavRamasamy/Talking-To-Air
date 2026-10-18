@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { normalizeSearchResults } from '../utils/discoveryResults'
 import { cmrTemporal } from '../utils/dateWindow.js'
+import { createLatest } from '../utils/latestRequest.js'
 import { apiFetch } from '../utils/apiFetch.js'
 import { API_BASE } from '../config.js'
 
@@ -9,6 +10,9 @@ export function useDiscovery() {
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  // Searches can overlap (each date change re-runs one); only the newest may
+  // write results, or a slow earlier reply shows the wrong window's datasets.
+  const searches = useRef(null)
   const [location, setLocation] = useState('')
   const [timeRange, setTimeRange] = useState('')
   // Per-dataset_handle quick-look/coverage results, so multiple cards can
@@ -39,6 +43,9 @@ export function useDiscovery() {
     const trimmed = query.trim()
     if (!trimmed) return
     const temporal = cmrTemporal(typeof windowValue === 'string' ? windowValue : timeRange)
+    searches.current ??= createLatest()
+    const latest = searches.current
+    const token = latest.next()
     setLoading(true)
     setError(null)
     try {
@@ -49,14 +56,15 @@ export function useDiscovery() {
       })
       if (!res.ok) throw new Error(await readErrorMessage(res))
       const data = await res.json()
+      if (!latest.isLatest(token)) return
       // The MCP returns {datasets:[{handle, summary:{…}}]}; normalize to the
       // flat shape the pane renders (tolerating the older results/dataset_handle
       // fixture shape too). See utils/discoveryResults.js.
       setResults(normalizeSearchResults(data))
     } catch (err) {
-      setError(err.message || 'Search failed')
+      if (latest.isLatest(token)) setError(err.message || 'Search failed')
     } finally {
-      setLoading(false)
+      if (latest.isLatest(token)) setLoading(false)
     }
   }, [query, timeRange])
 
