@@ -216,7 +216,7 @@ export default function DiscoveryPane({
             onChange={event => setQuery(event.target.value)}
             placeholder="soil moisture, formaldehyde…"
             style={{
-              flex: 1, height: '32px', fontSize: '12px', padding: '0 10px',
+              flex: 1, minWidth: 0, height: '32px', fontSize: '12px', padding: '0 10px',
               border: '1px solid var(--border)', borderRadius: '9px',
               background: 'var(--bg-secondary)', color: 'var(--text-primary)',
             }}
@@ -226,7 +226,7 @@ export default function DiscoveryPane({
             style={{
               height: '32px', padding: '0 14px', fontSize: '12px', fontWeight: 700,
               border: 'none', borderRadius: '9px', background: 'var(--teal)',
-              color: 'white', cursor: 'pointer',
+              color: 'white', cursor: 'pointer', flexShrink: 0,
             }}
           >
             Search
@@ -237,9 +237,10 @@ export default function DiscoveryPane({
           <input
             value={location}
             onChange={event => setLocation(event.target.value)}
-            placeholder="Area (e.g. Raritan basin)"
+            placeholder="New Jersey"
+            aria-label="Area"
             style={{
-              flex: 1, height: '28px', fontSize: '11px', padding: '0 8px',
+              flex: 1, minWidth: 0, height: '28px', fontSize: '11px', padding: '0 8px',
               border: '1px solid var(--border)', borderRadius: '7px',
               background: 'var(--bg-secondary)', color: 'var(--text-primary)',
             }}
@@ -247,9 +248,10 @@ export default function DiscoveryPane({
           <input
             value={timeRange}
             onChange={event => setTimeRange(event.target.value)}
-            placeholder="Window (e.g. 2026-06-01/2026-06-30)"
+            placeholder="2026-06-01/2026-06-30"
+            aria-label="Time window"
             style={{
-              flex: 1, height: '28px', fontSize: '11px', padding: '0 8px',
+              flex: 1, minWidth: 0, height: '28px', fontSize: '11px', padding: '0 8px',
               border: '1px solid var(--border)', borderRadius: '7px',
               background: 'var(--bg-secondary)', color: 'var(--text-primary)',
             }}

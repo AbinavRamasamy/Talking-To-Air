@@ -9,7 +9,7 @@ export function useDiscovery() {
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [location, setLocation] = useState('')
+  const [location, setLocation] = useState('New Jersey')
   const [timeRange, setTimeRange] = useState('')
   // Per-dataset_handle quick-look/coverage results, so multiple cards can
   // hold their own state at once without clobbering each other.
