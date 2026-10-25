@@ -9,6 +9,7 @@ import { compareBadgeLabel, isChartComparable, isSelectionFull, slotIndexOf } fr
 import { reachableArtifacts } from '../utils/artifactReachability'
 import VariableChoicePicker from './VariableChoicePicker'
 import { apiFetch } from '../utils/apiFetch.js'
+import { PANEL_HEADER_HEIGHT } from '../utils/panelLayout.js'
 
 const TYPE_LABEL = { map: 'Map', comparison: 'Comparison', timeseries: 'Time series', table: 'Table' }
 
@@ -733,9 +734,16 @@ export default function Chat({
 
       {/* Top bar */}
       <div style={{
-        padding: '16px 20px 14px', borderBottom: '1px solid var(--border)',
-        background: 'var(--bg-card)', flexShrink: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
+        height: `${PANEL_HEADER_HEIGHT}px`,
+        padding: '0 20px',
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--bg-card)',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '8px',
+        boxSizing: 'border-box',
       }}>
         <span style={{
           fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)',
@@ -890,7 +898,6 @@ export default function Chat({
       <div style={{
         padding: '12px 16px 16px',
         background: 'var(--bg-primary)',
-        borderTop: isEmpty ? 'none' : '1px solid var(--border)',
         flexShrink: 0,
       }}>
         <div style={{

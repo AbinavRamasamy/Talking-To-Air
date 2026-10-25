@@ -7,6 +7,7 @@ import ArtifactMessage, { TableArtifactMessage } from './ArtifactMessage'
 import TableMapPanel from './TableMapPanel.jsx'
 import RelatedVariablesPanel from './RelatedVariablesPanel.jsx'
 import MapScrubber from './MapScrubber.jsx'
+import DiscoverJobsControl from './DiscoverJobsControl.jsx'
 import { useFrameStack } from '../hooks/useFrameStack.js'
 import { resolveFrameState } from '../utils/frameAxis.js'
 import { resolveScrubberScale } from '../utils/frameScale.js'
@@ -16,7 +17,7 @@ import {
   extentOverstatementNote, resolveScrubStop, resolveStatisticChoice, resolveStatisticSource,
 } from '../utils/frameStatistic.js'
 import { selectFrame } from '../utils/frameStack.js'
-import { PANEL_MIN_WIDTH } from '../utils/panelLayout.js'
+import { PANEL_MIN_WIDTH, PANEL_HEADER_HEIGHT } from '../utils/panelLayout.js'
 import { MetadataOverview } from './MetadataOverview.jsx'
 import { MetaField } from './metadataPrimitives.jsx'
 import { smallButtonStyle, copyToClipboard } from '../utils/metadataUiHelpers.js'
@@ -55,6 +56,32 @@ const panelRootStyle = {
 // Most branches also clip their own overflow; the empty state deliberately does
 // not, because it centres its content rather than scrolling it.
 const panelRootClipped = { ...panelRootStyle, overflow: 'hidden' }
+
+// Shared header style so the bottom border aligns with the chat header border.
+const panelHeaderStyle = {
+  height: `${PANEL_HEADER_HEIGHT}px`,
+  padding: '0 22px',
+  borderBottom: '1px solid var(--border)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '24px',
+  flexShrink: 0,
+  boxSizing: 'border-box',
+}
+
+const panelTitleStyle = {
+  fontSize: '16px',
+  fontWeight: 800,
+  color: 'var(--text-primary)',
+  minWidth: 0,
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  wordBreak: 'break-word',
+  lineHeight: 1.25,
+}
 
 function compactDate(value) {
   if (!value) return ''
@@ -824,22 +851,61 @@ function CompareControl({ compareMode, compareCount, filledCount, onStart, onCan
   )
 }
 
+function HeaderRightControls({
+  compareControlProps,
+  rightPanelTab = null,
+  onSelectRightPanelTab,
+  hasRunningJobs = false,
+}) {
+  if (rightPanelTab === null) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, paddingLeft: '16px' }}>
+        <CompareControl {...compareControlProps} />
+        <span style={{ color: 'var(--text-hint)', fontSize: '13px', margin: '0 2px', userSelect: 'none' }}>|</span>
+        <DiscoverJobsControl
+          tab={null}
+          onSelectTab={onSelectRightPanelTab}
+          hasRunningJobs={hasRunningJobs}
+          style={{ width: '210px' }}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0, paddingLeft: '16px' }}>
+      <CompareControl {...compareControlProps} />
+    </div>
+  )
+}
+
 // Table and ground-validation timeseries artifacts (T33) get an outer tab
 // bar of their own -- table keeps its existing grid alongside a new
 // Metadata tab; ground-validation timeseries has no chartable series data
 // of its own, so Metadata is its only tab (see ARTIFACT_TABS). The caller
 // keys this by artifact.id so switching artifacts remounts it fresh
 // (activeTab reset) instead of needing an effect to resync local state.
-function ArtifactTabsPanel({ artifact, compareControlProps }) {
+function ArtifactTabsPanel({
+  artifact,
+  compareControlProps,
+  rightPanelTab,
+  onSelectRightPanelTab,
+  hasRunningJobs,
+}) {
   const tabs = ARTIFACT_TABS[artifact.type] || ['metadata']
   const [activeTab, setActiveTab] = useState(tabs[0])
   const metaChips = useMemo(() => artifactMetaChips(artifact), [artifact])
 
   return (
     <div style={panelRootClipped}>
-      <div style={{ padding: '14px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)' }}>{artifact.title || 'Output'}</div>
-        <CompareControl {...compareControlProps} />
+      <div style={{ ...panelHeaderStyle, justifyContent: 'space-between' }}>
+        <div title={artifact.title || 'Output'} style={panelTitleStyle}>{artifact.title || 'Output'}</div>
+        <HeaderRightControls
+          compareControlProps={compareControlProps}
+          rightPanelTab={rightPanelTab}
+          onSelectRightPanelTab={onSelectRightPanelTab}
+          hasRunningJobs={hasRunningJobs}
+        />
       </div>
 
       {metaChips.length > 0 && (
@@ -877,6 +943,7 @@ export default function OutputPanel({
   onStartCompare, onCancelChooseCompare, onEnterCompare, onExitCompare,
   sessionsCollapsed = false, chatCollapsed = false, rightPanelCollapsed = false,
   onCollapseSessions, onCollapseRightPanel,
+  rightPanelTab = null, onSelectRightPanelTab, hasRunningJobs = false,
 }) {
   const kind = focusedOutput?.kind
   const chart = kind === 'chart' ? focusedOutput.data : null
@@ -992,9 +1059,14 @@ export default function OutputPanel({
   if (compareMode === 'active') {
     return (
       <div style={panelRootClipped}>
-        <div style={{ padding: '14px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div style={{ ...panelHeaderStyle, justifyContent: 'space-between' }}>
           <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)' }}>Compare</div>
-          <CompareControl {...compareControlProps} />
+          <HeaderRightControls
+            compareControlProps={compareControlProps}
+            rightPanelTab={rightPanelTab}
+            onSelectRightPanelTab={onSelectRightPanelTab}
+            hasRunningJobs={hasRunningJobs}
+          />
         </div>
         {showCollapseHint && (
           <CollapseHint
@@ -1022,8 +1094,13 @@ export default function OutputPanel({
   if (!focusedOutput) {
     return (
       <div style={panelRootStyle}>
-        <div style={{ padding: '14px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 }}>
-          <CompareControl {...compareControlProps} />
+        <div style={{ ...panelHeaderStyle, justifyContent: 'flex-end' }}>
+          <HeaderRightControls
+            compareControlProps={compareControlProps}
+            rightPanelTab={rightPanelTab}
+            onSelectRightPanelTab={onSelectRightPanelTab}
+            hasRunningJobs={hasRunningJobs}
+          />
         </div>
         <div style={{
           flex: 1, display: 'flex', flexDirection: 'column',
@@ -1042,14 +1119,28 @@ export default function OutputPanel({
   }
 
   if (isMetadataTabbedArtifact) {
-    return <ArtifactTabsPanel key={artifact.id} artifact={artifact} compareControlProps={compareControlProps} />
+    return (
+      <ArtifactTabsPanel
+        key={artifact.id}
+        artifact={artifact}
+        compareControlProps={compareControlProps}
+        rightPanelTab={rightPanelTab}
+        onSelectRightPanelTab={onSelectRightPanelTab}
+        hasRunningJobs={hasRunningJobs}
+      />
+    )
   }
 
   if (artifact && !chart) {
     return (
       <div style={panelRootClipped}>
-        <div style={{ padding: '14px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 }}>
-          <CompareControl {...compareControlProps} />
+        <div style={{ ...panelHeaderStyle, justifyContent: 'flex-end' }}>
+          <HeaderRightControls
+            compareControlProps={compareControlProps}
+            rightPanelTab={rightPanelTab}
+            onSelectRightPanelTab={onSelectRightPanelTab}
+            hasRunningJobs={hasRunningJobs}
+          />
         </div>
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '18px 22px' }}>
           <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '4px' }}>{artifact.title || 'Output'}</div>
@@ -1067,9 +1158,14 @@ export default function OutputPanel({
 
   return (
     <div style={panelRootClipped}>
-      <div style={{ padding: '14px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)' }}>{title}</div>
-        <CompareControl {...compareControlProps} />
+      <div style={{ ...panelHeaderStyle, justifyContent: 'space-between' }}>
+        <div title={title} style={panelTitleStyle}>{title}</div>
+        <HeaderRightControls
+          compareControlProps={compareControlProps}
+          rightPanelTab={rightPanelTab}
+          onSelectRightPanelTab={onSelectRightPanelTab}
+          hasRunningJobs={hasRunningJobs}
+        />
       </div>
 
       {metaChips.length > 0 && (
