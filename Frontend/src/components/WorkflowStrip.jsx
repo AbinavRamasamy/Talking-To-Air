@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { cleanStatusMessage } from '../utils/workflowStage'
 
 const STAGE_LABELS = {
   search: 'Searching',
@@ -48,6 +49,17 @@ export default function WorkflowStrip({ workflowStage, startedAt }) {
   }
 
   const elapsedSeconds = startedAt != null ? Math.max(0, Math.round((now - startedAt) / 1000)) : null
+  const displayLabel = cleanStatusMessage(label) || (stage ? STAGE_LABELS[stage] || stage : '')
+
+  let displayDetail = null
+  if (detail != null && stage !== 'working') {
+    if (typeof detail === 'string') {
+      const trimmed = detail.trim()
+      if (trimmed && !displayLabel.includes(trimmed)) {
+        displayDetail = trimmed
+      }
+    }
+  }
 
   return (
     <div style={{
@@ -59,8 +71,8 @@ export default function WorkflowStrip({ workflowStage, startedAt }) {
         background: 'var(--teal)', flexShrink: 0,
         animation: 'wm-bounce 1.2s ease-in-out infinite',
       }} />
-      <span>{label || (stage ? STAGE_LABELS[stage] || stage : '')}</span>
-      {detail != null && <span style={{ opacity: 0.75 }}>{String(detail)}</span>}
+      <span>{displayLabel}</span>
+      {displayDetail != null && <span style={{ opacity: 0.75 }}>{displayDetail}</span>}
       {elapsedSeconds != null && (
         <span style={{ opacity: 0.6, marginLeft: 'auto' }}>{formatElapsed(elapsedSeconds)}</span>
       )}

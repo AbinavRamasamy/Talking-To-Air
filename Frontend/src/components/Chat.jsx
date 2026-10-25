@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import WorkflowStrip from './WorkflowStrip'
+import { cleanStatusMessage } from '../utils/workflowStage'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -198,7 +199,7 @@ function LoadingMessage({ toolCalls, statusMessage, workflowStage, startedAt }) 
               <div style={{ marginTop: '5px', paddingLeft: '3px' }}>
                 <WorkflowStrip workflowStage={workflowStage} startedAt={startedAt} />
               </div>
-            ) : statusMessage && (
+            ) : cleanStatusMessage(statusMessage) && (
               <div style={{
                 marginTop: '5px',
                 paddingLeft: '3px',
@@ -206,7 +207,7 @@ function LoadingMessage({ toolCalls, statusMessage, workflowStage, startedAt }) 
                 fontSize: '12px',
                 lineHeight: 1.45,
               }}>
-                {statusMessage}
+                {cleanStatusMessage(statusMessage)}
               </div>
             )}
             <div style={{ display: 'flex', gap: '4px', paddingTop: '8px' }}>
@@ -221,9 +222,9 @@ function LoadingMessage({ toolCalls, statusMessage, workflowStage, startedAt }) 
           </div>
         ) : hasWorkflowStrip ? (
           <WorkflowStrip workflowStage={workflowStage} startedAt={startedAt} />
-        ) : statusMessage ? (
+        ) : cleanStatusMessage(statusMessage) ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '12px', lineHeight: 1.45 }}>
-            {statusMessage}
+            {cleanStatusMessage(statusMessage)}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>

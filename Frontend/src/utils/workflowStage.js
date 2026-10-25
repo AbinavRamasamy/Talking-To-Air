@@ -14,12 +14,23 @@ export const INITIAL_WORKFLOW_STATE = {
   active: false,
 }
 
+export function cleanStatusMessage(msg) {
+  if (!msg || typeof msg !== 'string') return ''
+  return msg
+    .replace(/\s*[([]?\s*[-—–]?\s*\d+\s*(?:seconds?|secs?|s)\s*elapsed\s*[)\]]?(?:\.\.\.)?\s*/gi, '')
+    .trim()
+}
+
 export function applyWorkflowEvent(state, event, data) {
   switch (event) {
     case 'status': {
-      const message = data?.message ?? state.label
+      const message = cleanStatusMessage(data?.message ?? state.label)
       const stage = data?.stage ?? state.stage
-      const detail = data && 'detail' in data && data.detail != null ? data.detail : state.detail
+      const isNewStage = data?.stage != null && data.stage !== state.stage
+      const rawDetail = data && 'detail' in data ? data.detail : null
+      const detail = stage === 'working'
+        ? null
+        : (rawDetail != null ? rawDetail : (isNewStage ? null : state.detail))
       return { ...state, stage, label: message, detail, active: true }
     }
     case 'job_progress': {
