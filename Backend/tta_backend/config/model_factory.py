@@ -14,7 +14,12 @@ _PROVIDERS = ("groq", "google")
 
 
 def build_chat_model(
-    provider: str, model: str, settings: Settings, *, agent_type: str = "unknown"
+    provider: str,
+    model: str,
+    settings: Settings,
+    *,
+    agent_type: str = "unknown",
+    fallback_model: str | None = None,
 ) -> Any:
     """Construct a chat model for ``provider`` + ``model``.
 
@@ -25,6 +30,9 @@ def build_chat_model(
     put the timing callback here. Use the vocabulary
     ``utils.metrics.AGENT_REQUESTS_TOTAL`` already uses ("satellite",
     "ground_sensor"), plus "supervisor", so the two metrics join.
+
+    If ``fallback_model`` is provided and differs from ``model``, wraps the primary
+    model in a fallback chain with the constructed fallback model.
 
     Raises ``ConfigurationError`` for any provider name outside the
     supported set, matching the existing fail-at-boot posture for other
@@ -40,24 +48,36 @@ def build_chat_model(
     if provider == "groq":
         from langchain_groq import ChatGroq
 
-        return ChatGroq(
+        primary = ChatGroq(
             model=model,
             groq_api_key=settings.groq_api_key,
             max_retries=settings.llm_max_retries,
             callbacks=timing_callbacks(agent_type),
         )
-    if provider == "google":
+    elif provider == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        return ChatGoogleGenerativeAI(
+        primary = ChatGoogleGenerativeAI(
             model=model,
             google_api_key=settings.google_api_key,
             max_retries=settings.llm_max_retries,
             callbacks=timing_callbacks(agent_type),
         )
-    raise ConfigurationError(
-        f"Unknown model provider {provider!r}; supported providers are {', '.join(_PROVIDERS)}"
-    )
+    else:
+        raise ConfigurationError(
+            f"Unknown model provider {provider!r}; supported providers are {', '.join(_PROVIDERS)}"
+        )
+
+    if fallback_model and fallback_model != model:
+        fallback = build_chat_model(
+            provider,
+            fallback_model,
+            settings,
+            agent_type=agent_type,
+        )
+        return primary.with_fallbacks([fallback])
+
+    return primary
 
 
 def structured_output(model: Any, schema: Any) -> Any:
