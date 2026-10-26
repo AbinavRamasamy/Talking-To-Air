@@ -61,8 +61,8 @@ def build_chat_model(
             max_retries=settings.llm_max_retries,
             callbacks=timing_callbacks(agent_type),
         )
-    if provider == "google":
-        return _gemini_chat_class()(
+    elif provider == "google":
+        primary = _gemini_chat_class()(
             model=model,
             google_api_key=settings.google_api_key,
             max_retries=settings.llm_max_retries,
