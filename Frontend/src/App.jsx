@@ -35,11 +35,14 @@ function CollapsedRail({ label, onExpand }) {
       title={`Show ${label}`}
       aria-label={`Show ${label}`}
       style={{
-        width: '28px', flexShrink: 0, border: 'none', cursor: 'pointer',
+        width: '28px', height: '100%', flexShrink: 0, border: 'none', cursor: 'pointer',
         background: 'var(--bg-card)', color: 'var(--text-muted)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        borderLeft: '1px solid var(--border)', borderRight: '1px solid var(--border)',
+        borderLeft: 'none', borderRight: 'none',
+        transition: 'color 0.15s, background 0.15s',
       }}
+      onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--bg-secondary)' }}
+      onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'var(--bg-card)' }}
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="9 18 15 12 9 6" />
@@ -371,12 +374,37 @@ function AuthenticatedApp({ user, onLogout }) {
   const artifacts = useMemo(() => {
     const seenArtifactIds = new Set()
     const dedupedArtifacts = []
+
+    const chartsById = new Map()
+    for (const msg of messages) {
+      for (const chart of msg.charts || []) {
+        const id = chart.id || chart.chart_id
+        if (id) chartsById.set(id, chart)
+      }
+    }
+
     for (const msg of messages) {
       for (const artifact of msg.artifacts || []) {
         const key = artifact.id || JSON.stringify(artifact)
         if (seenArtifactIds.has(key)) continue
         seenArtifactIds.add(key)
-        dedupedArtifacts.push(artifact)
+        const matchingChart = artifact.id ? chartsById.get(artifact.id) : null
+        dedupedArtifacts.push({
+          ...artifact,
+          chart: matchingChart || null,
+        })
+      }
+      for (const chart of msg.charts || []) {
+        const key = chart.id || chart.chart_id
+        if (key && !seenArtifactIds.has(key)) {
+          seenArtifactIds.add(key)
+          dedupedArtifacts.push({
+            id: key,
+            type: chart.type === 'heatmap' ? 'map' : chart.type,
+            title: chart.title || chart.variable || 'Output',
+            chart,
+          })
+        }
       }
     }
     return dedupedArtifacts
@@ -429,12 +457,62 @@ function AuthenticatedApp({ user, onLogout }) {
         collapsed={sessionsCollapsed}
         onCollapse={toggleSessionsCollapsed}
         onExpand={toggleSessionsCollapsed}
+        focusedOutput={focusedOutput}
+        onFocusOutput={setFocusedOutput}
+        compareMode={compareMode}
+        compareSelection={compareSelection}
+        onToggleCompareSlot={toggleCompareSlot}
       />
 
-      {chatCollapsed ? (
-        <CollapsedRail label="chat" onExpand={toggleChatCollapsed} />
-      ) : (
-        <div style={{ width: '380px', flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Chat panel container with animated open/close transition */}
+      <div
+        style={{
+          /* width: '380px', flexShrink: 0 */
+          width: chatCollapsed ? '28px' : '380px',
+          flexShrink: 0,
+          borderRight: '1px solid var(--border)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          position: 'relative',
+          height: '100%',
+          transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
+        {/* Collapsed rail view */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            bottom: 0,
+            width: '28px',
+            display: 'flex',
+            opacity: chatCollapsed ? 1 : 0,
+            pointerEvents: chatCollapsed ? 'auto' : 'none',
+            transition: 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            zIndex: 2,
+          }}
+        >
+          <CollapsedRail label="chat" onExpand={toggleChatCollapsed} />
+        </div>
+
+        {/* Expanded chat view */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            bottom: 0,
+            width: '380px',
+            minWidth: '380px',
+            display: 'flex',
+            flexDirection: 'column',
+            opacity: chatCollapsed ? 0 : 1,
+            pointerEvents: chatCollapsed ? 'none' : 'auto',
+            transition: 'opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+          }}
+        >
           <Chat
             messages={messages}
             loading={loading}
@@ -454,7 +532,7 @@ function AuthenticatedApp({ user, onLogout }) {
             onCollapse={toggleChatCollapsed}
           />
         </div>
-      )}
+      </div>
 
       <OutputPanel
         focusedOutput={focusedOutput}

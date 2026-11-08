@@ -672,9 +672,13 @@ export default function Chat({
             title="Collapse chat"
             aria-label="Collapse chat"
             style={{
-              background: 'transparent', border: 'none', padding: '2px', cursor: 'pointer',
-              display: 'flex', flexShrink: 0, color: 'var(--text-muted)',
+              background: 'transparent', border: 'none', padding: '4px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              color: 'var(--text-muted)', borderRadius: '6px',
+              transition: 'color 0.15s, background 0.15s',
             }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--bg-secondary)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 6 9 12 15 18" />

@@ -32,7 +32,10 @@ export default function DiscoverJobsControl({ tab, onSelectTab, hasRunningJobs, 
               cursor: 'pointer',
               padding: '6px 8px',
               borderRadius: '6px',
+              transition: 'color 0.15s, background 0.15s',
             }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--bg-card)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}
           >
             Discover
           </button>
@@ -54,7 +57,10 @@ export default function DiscoverJobsControl({ tab, onSelectTab, hasRunningJobs, 
               padding: '6px 8px',
               borderRadius: '6px',
               gap: '5px',
+              transition: 'color 0.15s, background 0.15s',
             }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--bg-card)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}
           >
             Jobs
             {hasRunningJobs && (
@@ -75,8 +81,12 @@ export default function DiscoverJobsControl({ tab, onSelectTab, hasRunningJobs, 
               alignItems: 'center',
               justifyContent: 'center',
               color: 'var(--text-muted)',
+              borderRadius: '6px',
               flexShrink: 0,
+              transition: 'color 0.15s, background 0.15s',
             }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--bg-primary)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="6 9 12 15 18 9" />
@@ -85,52 +95,90 @@ export default function DiscoverJobsControl({ tab, onSelectTab, hasRunningJobs, 
         </>
       ) : (
         <>
-          <button
-            type="button"
-            onClick={() => onSelectTab(tab === 'discover' ? null : 'discover')}
+          <div
+            role="tablist"
             style={{
               flex: 1,
-              display: 'flex',
+              position: 'relative',
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              height: '100%',
               alignItems: 'center',
-              justifyContent: 'center',
-              border: 'none',
-              fontSize: '12.5px',
-              fontWeight: 700,
-              padding: '6px 12px',
-              borderRadius: '7px',
-              cursor: 'pointer',
-              background: tab === 'discover' ? 'var(--bg-card)' : 'transparent',
-              color: tab === 'discover' ? 'var(--text-primary)' : 'var(--text-muted)',
-              boxShadow: tab === 'discover' ? 'var(--shadow-sm)' : 'none',
             }}
           >
-            Discover
-          </button>
-          <button
-            type="button"
-            onClick={() => onSelectTab(tab === 'jobs' ? null : 'jobs')}
-            style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: 'none',
-              fontSize: '12.5px',
-              fontWeight: 700,
-              padding: '6px 12px',
-              borderRadius: '7px',
-              cursor: 'pointer',
-              background: tab === 'jobs' ? 'var(--bg-card)' : 'transparent',
-              color: tab === 'jobs' ? 'var(--text-primary)' : 'var(--text-muted)',
-              boxShadow: tab === 'jobs' ? 'var(--shadow-sm)' : 'none',
-              gap: '5px',
-            }}
-          >
-            Jobs
-            {hasRunningJobs && (
-              <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: 'var(--warning)' }} />
-            )}
-          </button>
+            {/* Sliding pill indicator */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: 0,
+                width: '50%',
+                background: 'var(--bg-card)',
+                borderRadius: '7px',
+                boxShadow: 'var(--shadow-sm)',
+                transform: tab === 'jobs' ? 'translateX(100%)' : 'translateX(0%)',
+                transition: 'transform 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
+                pointerEvents: 'none',
+                zIndex: 1,
+              }}
+            />
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'discover'}
+              onClick={() => onSelectTab(tab === 'discover' ? null : 'discover')}
+              style={{
+                position: 'relative',
+                zIndex: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: 'none',
+                background: 'transparent',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                padding: '6px 12px',
+                borderRadius: '7px',
+                cursor: 'pointer',
+                color: tab === 'discover' ? 'var(--text-primary)' : 'var(--text-muted)',
+                transition: 'color 0.18s ease',
+              }}
+            >
+              Discover
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'jobs'}
+              onClick={() => onSelectTab(tab === 'jobs' ? null : 'jobs')}
+              style={{
+                position: 'relative',
+                zIndex: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: 'none',
+                background: 'transparent',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                padding: '6px 12px',
+                borderRadius: '7px',
+                cursor: 'pointer',
+                color: tab === 'jobs' ? 'var(--text-primary)' : 'var(--text-muted)',
+                transition: 'color 0.18s ease',
+                gap: '5px',
+              }}
+            >
+              Jobs
+              {hasRunningJobs && (
+                <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: 'var(--warning)' }} />
+              )}
+            </button>
+          </div>
+
           <button
             type="button"
             onClick={() => onSelectTab(null)}
@@ -145,8 +193,12 @@ export default function DiscoverJobsControl({ tab, onSelectTab, hasRunningJobs, 
               alignItems: 'center',
               justifyContent: 'center',
               color: 'var(--text-muted)',
+              borderRadius: '6px',
               flexShrink: 0,
+              transition: 'color 0.15s, background 0.15s',
             }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--bg-primary)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="18 15 12 9 6 15" />

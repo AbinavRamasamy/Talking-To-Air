@@ -16,11 +16,21 @@ function ModeButton({ active, onClick, children }) {
       onClick={onClick}
       aria-pressed={active}
       style={{
-        flex: 1, height: '24px', fontSize: '11px', fontWeight: active ? 700 : 500,
-        border: 'none', borderRadius: '6px', cursor: 'pointer',
-        background: active ? 'var(--bg-card)' : 'transparent',
+        position: 'relative',
+        zIndex: 2,
+        flex: 1,
+        height: '24px',
+        fontSize: '11px',
+        fontWeight: active ? 700 : 500,
+        border: 'none',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        background: 'transparent',
         color: active ? 'var(--text-primary)' : 'var(--text-muted)',
-        boxShadow: active ? 'var(--shadow-sm)' : 'none',
+        transition: 'color 0.18s ease',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
     >
       {children}
@@ -74,7 +84,38 @@ function DateWindowPicker({ value, onChange }) {
   return (
     <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <div role="group" aria-label="Time window" style={{ flex: 1, display: 'flex', gap: '2px', padding: '2px', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+        <div
+          role="group"
+          aria-label="Time window"
+          style={{
+            flex: 1,
+            position: 'relative',
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            padding: '2px',
+            borderRadius: '8px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            boxSizing: 'border-box',
+          }}
+        >
+          {/* Sliding pill indicator */}
+          <div
+            style={{
+              position: 'absolute',
+              top: '2px',
+              bottom: '2px',
+              left: '2px',
+              width: 'calc(50% - 2px)',
+              background: 'var(--bg-card)',
+              borderRadius: '6px',
+              boxShadow: 'var(--shadow-sm)',
+              transform: mode === 'range' ? 'translateX(100%)' : 'translateX(0%)',
+              transition: 'transform 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
+              pointerEvents: 'none',
+              zIndex: 1,
+            }}
+          />
           <ModeButton active={mode === 'day'} onClick={() => pickMode('day')}>Single day</ModeButton>
           <ModeButton active={mode === 'range'} onClick={() => pickMode('range')}>Date range</ModeButton>
         </div>
