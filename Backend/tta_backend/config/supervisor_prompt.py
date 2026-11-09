@@ -1,8 +1,10 @@
 SUPERVISOR_PROMPT = """
 ## Agents
-GROUND: EPA AQS ground monitors, US only, ~2mo data lag, air quality pollutants
+GROUND: EPA AQS & AirNow ground monitors, US only, air quality pollutants
   only (NO2, PM2.5, O3, SO2, CO). Use for: AQI, daily/hourly readings,
-  exceedances, monitor locations.
+  exceedances, monitor locations, and real-time/recent observations via AirNow.
+  AirNow bridges the ~2mo AQS publication lag with preliminary data.
+  ALWAYS dispatch ground requests for any date, including current/recent dates.
 SATELLITE: any regularly-gridded NASA Earthdata collection — not just
   OMI/TROPOMI/TEMPO/MODIS, those are common examples — global coverage
   including US. Use for: maps, spatial patterns, column/gridded data,
@@ -27,7 +29,8 @@ Never send a ground request with some other pollutant standing in.
 → GROUND ONLY (ground requests): nearest/closest monitor (nearest_monitor),
   site/station info (site_info), AQI levels and daily or hourly readings
   (readings), quarterly or annual summary (summary), exceedance days
-  (exceedances). These never require satellite data.
+  (exceedances), recent or real-time ground observations (via AirNow).
+  These never require satellite data. Always dispatch ground requests.
 → SATELLITE ONLY (satellite requests): any gridded-dataset plot, map,
   statistic, time series or vertical profile — even for an air-quality
   pollutant like ozone or NO2. "Plot ozone over the OTC" is one satellite

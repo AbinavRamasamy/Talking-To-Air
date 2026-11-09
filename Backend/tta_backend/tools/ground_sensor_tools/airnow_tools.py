@@ -206,14 +206,14 @@ async def get_airnow_observation(location: str, date: Optional[str] = None, dist
         try:
             target_dt = datetime.fromisoformat(date.strip().split("T")[0])
             start_str = target_dt.strftime("%Y-%m-%dT00")
-            end_str = (target_dt + timedelta(days=1)).strftime("%Y-%m-%dT00")
+            end_str = target_dt.strftime("%Y-%m-%dT23")
             ttl = CACHE_TTL_HISTORICAL
         except ValueError:
-            start_str = (now_utc - timedelta(hours=6)).strftime("%Y-%m-%dT%H")
+            start_str = (now_utc - timedelta(hours=3)).strftime("%Y-%m-%dT%H")
             end_str = now_utc.strftime("%Y-%m-%dT%H")
             ttl = CACHE_TTL_CURRENT
     else:
-        start_str = (now_utc - timedelta(hours=6)).strftime("%Y-%m-%dT%H")
+        start_str = (now_utc - timedelta(hours=3)).strftime("%Y-%m-%dT%H")
         end_str = now_utc.strftime("%Y-%m-%dT%H")
         ttl = CACHE_TTL_CURRENT
 
@@ -314,12 +314,12 @@ async def get_airnow_area_data(
         try:
             target_dt = datetime.fromisoformat(date.strip().split("T")[0])
             start_str = target_dt.strftime("%Y-%m-%dT00")
-            end_str = (target_dt + timedelta(days=1)).strftime("%Y-%m-%dT00")
+            end_str = target_dt.strftime("%Y-%m-%dT23")
         except ValueError:
-            start_str = (now_utc - timedelta(hours=6)).strftime("%Y-%m-%dT%H")
+            start_str = (now_utc - timedelta(hours=3)).strftime("%Y-%m-%dT%H")
             end_str = now_utc.strftime("%Y-%m-%dT%H")
     else:
-        start_str = (now_utc - timedelta(hours=6)).strftime("%Y-%m-%dT%H")
+        start_str = (now_utc - timedelta(hours=3)).strftime("%Y-%m-%dT%H")
         end_str = now_utc.strftime("%Y-%m-%dT%H")
 
     params_str = parameters if parameters else "O3,PM25,NO2"

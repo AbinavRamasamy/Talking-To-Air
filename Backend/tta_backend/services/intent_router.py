@@ -38,8 +38,11 @@ _GROUND_PATTERNS: list[str] = [
     r"\bhourly\s+(profile|reading|data)\b",
     r"\bair\s+quality\s+(data|reading|levels?|index|report)\b",
     r"\bAQI\b",
-    # explicit EPA/AQS references
-    r"\b(EPA|AQS)\s+(monitor|data|station|sensor)\b",
+    # explicit EPA/AQS/AirNow references
+    r"\b(EPA|AQS|AirNow)\s+(monitor|data|station|sensor|observation)s?\b",
+    r"\bAirNow\b",
+    # explicit ground data/observation references
+    r"\bground\s+(data|monitor|sensor|station|reading|measurement|observation)s?\b",
     # pollutant + specific ground-sensor nouns (exclude "data" — too ambiguous with satellite)
     r"\b(NO2|PM2\.5|PM25|ozone|SO2|CO)\s+(monitor|sensor|station|site|reading|level)\b",
 ]

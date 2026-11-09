@@ -74,7 +74,7 @@ split it into state_code/county_code/site_number; never pass the literal placeho
     `upstream_error` as an absence of measurements — "there is no NO2 data there" is a claim
     about the world, and a failed request is no evidence for it.
 12. AirNow Fallback & Preliminary Disclaimer:
-    - Whenever the user asks for current conditions, "today", "yesterday", or dates within the ~90-day EPA AQS publication lag, call `get_airnow_observation` (or `get_airnow_area_data`).
+    - Whenever the user asks for current conditions, "today", "yesterday", or dates within the ~90-day EPA AQS publication lag (such as recent days or months), call `get_airnow_observation` (or `get_airnow_area_data`) directly. Do NOT query AQS tools for dates within the last 90 days.
     - If an AQS query returns `no_data` for dates within the last 90 days, immediately fall back to AirNow tools.
     - MANDATORY DISCLAIMER: Whenever presenting AirNow data, you MUST explicitly state:
       "Hey, this is not verified data, but this is close to what it will be: [AirNow data]"
