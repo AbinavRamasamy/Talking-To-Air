@@ -443,6 +443,7 @@ class Settings:
     )
     aqs_api_email: str = field(default_factory=lambda: os.getenv("AQS_API_EMAIL", "your_email@example.com"))
     aqs_api_key: str = field(default_factory=lambda: os.getenv("AQS_API_KEY", "your_aqs_key"))
+    airnow_api_key: str = field(default_factory=lambda: os.getenv("AIRNOW_API_KEY", ""))
 
     subagent_trim_token_ceiling: int = field(
         default_factory=lambda: max(1, _int_env("SUBAGENT_TRIM_TOKEN_CEILING", 20000))
