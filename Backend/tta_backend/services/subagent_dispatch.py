@@ -481,14 +481,24 @@ def render_unexpected_exception(exc: Exception, stage: str) -> str:
     (possibly empty, possibly an internal path) never reaches the researcher —
     the real exception goes to the logs here."""
     if isinstance(exc, MCPToolError):
-        return render_error_answer(exc.category, stage, exc.message)
-    category = _classify_escaped_exception(exc)
-    logger.exception(
-        "subagent_unexpected_exception",
-        extra={"_event": "subagent_unexpected_exception", "_stage": stage, "_category": category},
-        exc_info=exc,
-    )
-    return render_error_answer(category, stage)
+        msg = render_error_answer(exc.category, stage, exc.message)
+    else:
+        category = _classify_escaped_exception(exc)
+        logger.exception(
+            "subagent_unexpected_exception",
+            extra={"_event": "subagent_unexpected_exception", "_stage": stage, "_category": category},
+            exc_info=exc,
+        )
+        msg = render_error_answer(category, stage)
+
+    try:
+        from tta_backend.tools.ground_sensor_tools.airnow_tools import get_last_airnow_raw_json_snippet
+        raw_snippet = get_last_airnow_raw_json_snippet()
+        if raw_snippet:
+            msg = f"{msg}\n\nHere is the raw AirNow data retrieved before the interruption:\n```json\n{raw_snippet}\n```"
+    except Exception:
+        pass
+    return msg
 
 
 def _finalize_sub_agent_result(result: AgentResult, agent_label: str) -> AgentResult:

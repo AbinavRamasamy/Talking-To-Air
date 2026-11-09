@@ -168,7 +168,15 @@ class ChatStreamService:
         if isinstance(exc, admission.AdmissionOverloaded):
             return list(self._overloaded_events(request_id, thread_id))
         logger.exception("agent_failure", extra={"_request_id": request_id, "_thread_id": thread_id})
-        return [self.sse("error", {"detail": render_error_answer(CATEGORY_CONTRACT, "request")})]
+        detail = render_error_answer(CATEGORY_CONTRACT, "request")
+        try:
+            from tta_backend.tools.ground_sensor_tools.airnow_tools import get_last_airnow_raw_json_snippet
+            raw_snippet = get_last_airnow_raw_json_snippet()
+            if raw_snippet:
+                detail = f"{detail}\n\nHere is the raw AirNow data retrieved before the interruption:\n```json\n{raw_snippet}\n```"
+        except Exception:
+            pass
+        return [self.sse("error", {"detail": detail})]
 
     async def stream_chat_events(
         self,

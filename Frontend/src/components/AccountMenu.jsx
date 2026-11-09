@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { accountSummary } from '../utils/accountDisplay.js'
 
 // The sidebar footer: who is signed in, and a popup with their account
@@ -38,10 +38,31 @@ function SignOutIcon() {
   )
 }
 
-export default function AccountMenu({ user, onLogout, onManageConnectors }) {
+export default function AccountMenu({ user, onLogout, onManageConnectors, collapsed = false }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef(null)
   const account = accountSummary(user)
+  const [popupPos, setPopupPos] = useState({ bottom: 70, left: 10 })
+
+  useEffect(() => {
+    setOpen(false)
+  }, [collapsed])
+
+  useLayoutEffect(() => {
+    if (!open || !collapsed) return undefined
+    const updatePosition = () => {
+      if (rootRef.current) {
+        const rect = rootRef.current.getBoundingClientRect()
+        setPopupPos({
+          bottom: Math.max(8, window.innerHeight - rect.top + 8),
+          left: Math.max(8, rect.left),
+        })
+      }
+    }
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    return () => window.removeEventListener('resize', updatePosition)
+  }, [open, collapsed])
 
   useEffect(() => {
     if (!open) return undefined
@@ -59,16 +80,50 @@ export default function AccountMenu({ user, onLogout, onManageConnectors }) {
     }
   }, [open])
 
+  const toggleOpen = () => {
+    if (!open && collapsed && rootRef.current) {
+      const rect = rootRef.current.getBoundingClientRect()
+      setPopupPos({
+        bottom: Math.max(8, window.innerHeight - rect.top + 8),
+        left: Math.max(8, rect.left),
+      })
+    }
+    setOpen(value => !value)
+  }
+
   return (
-    <div ref={rootRef} style={{ position: 'relative', borderTop: '1px solid var(--border)', paddingTop: '14px', marginTop: '10px' }}>
+    <div
+      ref={rootRef}
+      style={{
+        position: 'relative',
+        borderTop: collapsed ? 'none' : '1px solid var(--border)',
+        paddingTop: collapsed ? '0' : '14px',
+        marginTop: collapsed ? '0' : '10px',
+        display: 'flex',
+        justifyContent: collapsed ? 'center' : 'stretch',
+        width: '100%',
+        boxSizing: 'border-box',
+      }}
+    >
       {open && (
         <div
           role="dialog"
           aria-label="Account"
           style={{
-            position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 20,
-            background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px',
-            boxShadow: 'var(--shadow-md)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px',
+            position: collapsed ? 'fixed' : 'absolute',
+            bottom: collapsed ? `${popupPos.bottom}px` : 'calc(100% + 6px)',
+            left: collapsed ? `${popupPos.left}px` : 0,
+            right: collapsed ? 'auto' : 0,
+            width: collapsed ? '240px' : 'auto',
+            zIndex: 100,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            borderRadius: '10px',
+            boxShadow: 'var(--shadow-md)',
+            padding: '12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -88,6 +143,7 @@ export default function AccountMenu({ user, onLogout, onManageConnectors }) {
           )}
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: '6px', display: 'flex', flexDirection: 'column' }}>
             <button
+              type="button"
               className="account-menu-item"
               style={menuButtonStyle}
               onClick={() => { setOpen(false); onManageConnectors() }}
@@ -98,7 +154,7 @@ export default function AccountMenu({ user, onLogout, onManageConnectors }) {
               </svg>
               Manage connectors
             </button>
-            <button className="account-menu-item" style={menuButtonStyle} onClick={onLogout}>
+            <button type="button" className="account-menu-item" style={menuButtonStyle} onClick={onLogout}>
               <SignOutIcon />
               Sign out
             </button>
@@ -106,28 +162,77 @@ export default function AccountMenu({ user, onLogout, onManageConnectors }) {
         </div>
       )}
 
-      <button
-        onClick={() => setOpen(value => !value)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        title="Account"
-        className="account-menu-item"
-        style={{ ...menuButtonStyle, padding: '4px', gap: '10px' }}
-      >
-        <div style={avatarStyle(32)}>{account.initials}</div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-primary)', ...ellipsis }}>{account.name}</div>
-          {account.email && (
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', ...ellipsis }}>{account.email}</div>
-          )}
-        </div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
-          <path d="M6 15l6-6 6 6" />
-        </svg>
-      </button>
+      {collapsed ? (
+        <button
+          type="button"
+          onClick={toggleOpen}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          title={account.name ? `${account.name} (Account)` : 'Account'}
+          aria-label={account.name ? `${account.name} (Account)` : 'Account'}
+          className="account-menu-item account-menu-avatar-btn"
+          style={{
+            width: '38px',
+            height: '38px',
+            borderRadius: '8px',
+            border: 'none',
+            background: open ? 'var(--bg-secondary)' : 'transparent',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            padding: 0,
+            transition: 'background 0.15s',
+          }}
+        >
+          <div style={avatarStyle(32)}>{account.initials}</div>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={toggleOpen}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          title="Account"
+          className="account-menu-item"
+          style={{
+            ...menuButtonStyle,
+            padding: '4px',
+            gap: '10px',
+            background: open ? 'var(--bg-secondary)' : 'transparent',
+            transition: 'background 0.15s',
+          }}
+        >
+          <div style={avatarStyle(32)}>{account.initials}</div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text-primary)', ...ellipsis }}>{account.name}</div>
+            {account.email && (
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', ...ellipsis }}>{account.email}</div>
+            )}
+          </div>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              color: 'var(--text-muted)',
+              flexShrink: 0,
+              transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.2s ease',
+            }}
+          >
+            <path d="M6 15l6-6 6 6" />
+          </svg>
+        </button>
+      )}
 
       <style>{`
-        .account-menu-item:hover { background: var(--bg-primary) !important; }
+        .account-menu-item:hover { background: var(--bg-secondary) !important; }
       `}</style>
     </div>
   )

@@ -8,7 +8,9 @@ Provides recent observations (hourly, current, area) that bridge the ~90-day EPA
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import math
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -24,7 +26,24 @@ from tta_backend.utils.plotting import get_geocoding_service
 logger = logging.getLogger(__name__)
 
 AIRNOW_BASE_URL = "https://www.airnowapi.org/aq"
-DEFAULT_TIMEOUT = 12.0
+DEFAULT_TIMEOUT = 25.0
+
+# Tracks the latest valid AirNow payload for raw-data fallback upon unexpected turn interruptions
+_last_airnow_raw_data: Any = None
+
+
+def get_last_airnow_raw_json_snippet() -> str | None:
+    data = _last_airnow_raw_data
+    if not data or (isinstance(data, dict) and "error" in data):
+        return None
+    try:
+        formatted = json.dumps(data, indent=2)
+        if len(formatted) > 3500:
+            formatted = formatted[:3500] + "\n... (truncated)"
+        return formatted
+    except Exception:
+        return None
+
 
 # In-memory sliding-window rate limiter (500 req/hour limit, ~8 req/min)
 class _AirNowRateLimiter:
@@ -107,11 +126,12 @@ def _build_artifact_response(
 
 
 async def _fetch_airnow(endpoint: str, params: dict[str, Any], ttl: float = CACHE_TTL_CURRENT) -> Any:
+    global _last_airnow_raw_data
     key = _get_api_key()
     if not key:
         return {"error": "AIRNOW_API_KEY is missing. Configure it in .env or settings."}
 
-    req_params = {**params, "api_key": key, "format": "application/json"}
+    req_params = {**params, "API_KEY": key, "format": "application/json"}
     cache_key = f"{endpoint}?{urlencode(sorted(req_params.items()))}"
 
     now = time.monotonic()
@@ -130,6 +150,8 @@ async def _fetch_airnow(endpoint: str, params: dict[str, Any], ttl: float = CACH
                 return {"error": "AirNow upstream rate limit reached. Please retry shortly."}
             resp.raise_for_status()
             data = resp.json()
+            if isinstance(data, (list, dict)) and "error" not in data:
+                _last_airnow_raw_data = data
             _response_cache[cache_key] = (now, data)
             return data
     except httpx.HTTPStatusError as e:
@@ -173,27 +195,38 @@ async def get_airnow_observation(location: str, date: Optional[str] = None, dist
         return {"Header": [{"status": "error", "message": f"Could not geocode location: '{location}'"}], "Body": []}
 
     lat, lon = geo["latitude"], geo["longitude"]
-    is_historical = False
-    req_date = ""
+    lat_delta = max(0.08, distance_miles / 69.0)
+    lon_delta = max(0.08, distance_miles / max(1.0, (69.0 * math.cos(math.radians(lat)))))
+    min_lat, max_lat = round(lat - lat_delta, 4), round(lat + lat_delta, 4)
+    min_lon, max_lon = round(lon - lon_delta, 4), round(lon + lon_delta, 4)
+    bbox = f"{min_lon},{min_lat},{max_lon},{max_lat}"
 
+    now_utc = datetime.now(timezone.utc)
     if date and date.strip().lower() not in {"today", "current", "now"}:
         try:
-            parsed = datetime.fromisoformat(date.strip().split("T")[0])
-            req_date = parsed.strftime("%Y-%m-%dT00-0000")
-            is_historical = True
+            target_dt = datetime.fromisoformat(date.strip().split("T")[0])
+            start_str = target_dt.strftime("%Y-%m-%dT00")
+            end_str = (target_dt + timedelta(days=1)).strftime("%Y-%m-%dT00")
+            ttl = CACHE_TTL_HISTORICAL
         except ValueError:
-            logger.warning("Invalid date '%s' passed to get_airnow_observation, defaulting to current", date)
-
-    if is_historical:
-        endpoint = "observation/latLong/historical/"
-        params = {"latitude": lat, "longitude": lon, "date": req_date, "distance": distance_miles}
-        ttl = CACHE_TTL_HISTORICAL
+            start_str = (now_utc - timedelta(hours=6)).strftime("%Y-%m-%dT%H")
+            end_str = now_utc.strftime("%Y-%m-%dT%H")
+            ttl = CACHE_TTL_CURRENT
     else:
-        endpoint = "observation/latLong/current/"
-        params = {"latitude": lat, "longitude": lon, "distance": distance_miles}
+        start_str = (now_utc - timedelta(hours=6)).strftime("%Y-%m-%dT%H")
+        end_str = now_utc.strftime("%Y-%m-%dT%H")
         ttl = CACHE_TTL_CURRENT
 
-    data = await _fetch_airnow(endpoint, params, ttl=ttl)
+    query_params = {
+        "startDate": start_str,
+        "endDate": end_str,
+        "parameters": "O3,PM25,NO2",
+        "BBOX": bbox,
+        "dataType": "B",
+        "verbose": 1,
+    }
+
+    data = await _fetch_airnow("data/", query_params, ttl=ttl)
     if isinstance(data, dict) and "error" in data:
         return {"Header": [{"status": "upstream_error", "message": data["error"]}], "Body": []}
     if not isinstance(data, list) or not data:
@@ -204,32 +237,31 @@ async def get_airnow_observation(location: str, date: Optional[str] = None, dist
 
     body: list[dict[str, Any]] = []
     for r in data:
-        param = r.get("ParameterName") or "AQI"
-        aqi_val = r.get("AQI")
-        cat_info = r.get("Category") or {}
-        cat_name = cat_info.get("Name") if isinstance(cat_info, dict) else str(cat_info)
         site_lat = r.get("Latitude", lat)
         site_lon = r.get("Longitude", lon)
-        rep_area = r.get("ReportingArea") or location
-        state_code = r.get("StateCode") or ""
+        param = r.get("Parameter") or "AQI"
+        unit = r.get("Unit") or "PPB"
+        raw_val = r.get("Value")
+        aqi_val = r.get("AQI")
+        val = raw_val if raw_val is not None and raw_val != -999 else aqi_val
+        site_name = r.get("SiteName") or r.get("AgencyName") or location
+        site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
 
         body.append({
-            "site_id": f"{state_code}-{rep_area}".strip("-"),
-            "local_site_name": rep_area,
-            "displayName": f"{rep_area} ({param})",
+            "site_id": site_code,
+            "local_site_name": site_name,
+            "displayName": f"{site_name} ({param})",
             "latitude": site_lat,
             "longitude": site_lon,
             "parameter": param,
-            "pollutant_standard": f"AirNow {param} AQI",
-            "mean": aqi_val,
-            "max": aqi_val,
-            "primaryVal": aqi_val,
+            "pollutant_standard": f"AirNow {param} ({unit})",
+            "mean": val,
+            "max": val,
+            "primaryVal": val,
             "aqi": aqi_val,
-            "category": cat_name,
-            "units": "AQI",
-            "date": r.get("DateObserved", "").strip(),
-            "hour": r.get("HourObserved"),
-            "timezone": r.get("LocalTimeZone"),
+            "category": str(r.get("Category", "")),
+            "units": unit,
+            "date": r.get("UTC", ""),
             "verified": False,
         })
 
@@ -271,10 +303,8 @@ async def get_airnow_area_data(
         return {"Header": [{"status": "error", "message": f"Could not geocode location: '{location}'"}], "Body": []}
 
     lat, lon = geo["latitude"], geo["longitude"]
-    # Approx degrees conversion for bounding box (1 deg lat ~ 69 miles, lon ~ 69 * cos(lat))
-    import math
-    lat_delta = distance_miles / 69.0
-    lon_delta = distance_miles / max(1.0, (69.0 * math.cos(math.radians(lat))))
+    lat_delta = max(0.1, distance_miles / 69.0)
+    lon_delta = max(0.1, distance_miles / max(1.0, (69.0 * math.cos(math.radians(lat)))))
     min_lat, max_lat = round(lat - lat_delta, 4), round(lat + lat_delta, 4)
     min_lon, max_lon = round(lon - lon_delta, 4), round(lon + lon_delta, 4)
     bbox = f"{min_lon},{min_lat},{max_lon},{max_lat}"
