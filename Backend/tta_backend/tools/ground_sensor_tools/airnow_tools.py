@@ -239,12 +239,12 @@ async def get_airnow_observation(location: str, date: Optional[str] = None, dist
     for r in data:
         site_lat = r.get("Latitude", lat)
         site_lon = r.get("Longitude", lon)
-        param = r.get("Parameter") or "AQI"
+        param = r.get("Parameter") or r.get("ParameterName") or "AQI"
         unit = r.get("Unit") or "PPB"
         raw_val = r.get("Value")
         aqi_val = r.get("AQI")
         val = raw_val if raw_val is not None and raw_val != -999 else aqi_val
-        site_name = r.get("SiteName") or r.get("AgencyName") or location
+        site_name = r.get("SiteName") or r.get("ReportingArea") or r.get("AgencyName") or location
         site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
 
         body.append({
@@ -345,12 +345,12 @@ async def get_airnow_area_data(
     for r in data:
         site_lat = r.get("Latitude")
         site_lon = r.get("Longitude")
-        param = r.get("Parameter") or "AQI"
+        param = r.get("Parameter") or r.get("ParameterName") or "AQI"
         unit = r.get("Unit") or "PPB"
         raw_val = r.get("Value")
         aqi_val = r.get("AQI")
         val = raw_val if raw_val is not None and raw_val != -999 else aqi_val
-        site_name = r.get("SiteName") or r.get("AgencyName") or "Monitor"
+        site_name = r.get("SiteName") or r.get("ReportingArea") or r.get("AgencyName") or "Monitor"
         site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
 
         body.append({
