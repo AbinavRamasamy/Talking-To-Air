@@ -478,7 +478,8 @@ def _no_data_message(kind: str, param_code: str, bdate_obj: date, edate_obj: dat
         return (
             f"EPA has not published {kind} data for {window} yet — AQS "
             "measurements are typically released with a lag of about two "
-            "months. Try a date at least three months in the past."
+            "months. Try a date at least three months in the past, or query "
+            "preliminary real-time data using AirNow tools."
         )
     return (
         f"No EPA {kind} measurements were found for parameter {param_code} "
