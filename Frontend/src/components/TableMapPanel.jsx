@@ -135,37 +135,77 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
   const error = !inlineRows && fetchedThis ? fetched.error : null
   const loading = !inlineRows && Boolean(artifact?.id) && !fetchedThis
 
-  // 2. Filter rows with valid coordinates
+  // 2. Filter rows with valid coordinates and combine rows by unique monitor station location
   const monitors = useMemo(() => {
     if (!rows || !rows.length) return []
-    return rows
-      .filter(r => {
-        const lat = Number(r.latitude)
-        const lon = Number(r.longitude)
-        return !isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0
-      })
-      .map(r => {
-        const lat = Number(r.latitude)
-        const lon = Number(r.longitude)
-        const meanVal = r.mean != null && !isNaN(Number(r.mean)) ? Number(r.mean) : null
-        const maxVal = r.max != null && !isNaN(Number(r.max)) ? Number(r.max) : null
-        const peakVal = r.peak?.value != null ? Number(r.peak.value) : null
-        const primaryVal = meanVal ?? maxVal ?? peakVal
-        return {
+
+    const parseNum = (v) => {
+      if (v == null || v === '' || v === '—') return null
+      const n = Number(v)
+      return !isNaN(n) && n > -900 ? n : null
+    }
+
+    const stationsMap = new Map()
+
+    for (const r of rows) {
+      const lat = Number(r.latitude)
+      const lon = Number(r.longitude)
+      if (isNaN(lat) || isNaN(lon) || lat === 0 || lon === 0) continue
+
+      const siteId = r.site_id || `${lat.toFixed(4)},${lon.toFixed(4)}`
+      const meanVal = parseNum(r.mean)
+      const maxVal = parseNum(r.max)
+      const peakVal = r.peak?.value != null ? parseNum(r.peak.value) : null
+      const primaryVal = meanVal ?? maxVal ?? peakVal
+
+      const cleanName = (r.local_site_name || r.station_name || r.monitor_name || r.site_id || 'Monitor')
+        .replace(/\s*\([^)]*\)\s*$/, '')
+
+      if (!stationsMap.has(siteId)) {
+        stationsMap.set(siteId, {
           ...r,
           lat,
           lon,
-          primaryVal,
-          site_id: r.site_id || `${lat.toFixed(3)},${lon.toFixed(3)}`,
-          displayName: r.local_site_name || r.monitor_name || r.site_id || 'Monitor',
+          site_id: siteId,
+          displayName: cleanName,
           units: r.units || '',
+          pollutant_standard: r.pollutant_standard || '',
+          values: primaryVal != null ? [primaryVal] : [],
+          means: meanVal != null ? [meanVal] : [],
+          maxs: maxVal != null ? [maxVal] : [],
+          peaks: peakVal != null ? [peakVal] : [],
+          parameters: new Set(r.parameter ? [r.parameter] : []),
+        })
+      } else {
+        const existing = stationsMap.get(siteId)
+        if (primaryVal != null) existing.values.push(primaryVal)
+        if (meanVal != null) existing.means.push(meanVal)
+        if (maxVal != null) existing.maxs.push(maxVal)
+        if (peakVal != null) existing.peaks.push(peakVal)
+        if (r.parameter) existing.parameters.add(r.parameter)
+        if ((!existing.displayName || existing.displayName === 'Monitor') && cleanName) {
+          existing.displayName = cleanName
         }
-      })
+      }
+    }
+
+    return Array.from(stationsMap.values()).map(st => {
+      const avgMean = st.means.length ? st.means.reduce((a, b) => a + b, 0) / st.means.length : null
+      const peakMax = st.maxs.length ? Math.max(...st.maxs) : null
+      const primary = avgMean ?? peakMax ?? (st.values.length ? st.values[0] : null)
+      return {
+        ...st,
+        mean: avgMean,
+        max: peakMax,
+        primaryVal: primary,
+        parameter_list: Array.from(st.parameters).join(', '),
+      }
+    })
   }, [rows])
 
   // Summary statistics
   const { minVal, maxVal, spatialMean, peakMonitor, lowestMonitor, units } = useMemo(() => {
-    const validVals = monitors.map(m => m.primaryVal).filter(v => v != null)
+    const validVals = monitors.map(m => m.primaryVal).filter(v => v != null && v > -900)
     const min = validVals.length ? Math.min(...validVals) : 0
     const max = validVals.length ? Math.max(...validVals) : 1
     const mean = validVals.length ? (validVals.reduce((acc, v) => acc + v, 0) / validVals.length) : 0
@@ -198,7 +238,7 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
           ${m.displayName}
         </div>
         <div style="font-size: 10.5px; font-family: monospace; color: #666; margin-bottom: 8px;">
-          Site ${m.site_id}
+          Site ${m.site_id}${m.parameter_list ? ` · ${m.parameter_list}` : ''}
         </div>
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
           <span style="font-size: 11.5px; color: #555;">Daily Mean:</span>

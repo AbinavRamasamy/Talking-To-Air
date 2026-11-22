@@ -173,12 +173,36 @@ def _format_aqs_id(raw_code: Any, state: str | None = None) -> str:
     return s or "AirNow-Station"
 
 
+def _clean_val(v: Any) -> float | None:
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        if f <= -900:
+            return None
+        return round(f, 3)
+    except (ValueError, TypeError):
+        return None
+
+
+def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 3958.8
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
 @tool
-async def get_airnow_observation(location: str, date: Optional[str] = None, distance_miles: int = 25) -> Dict[str, Any]:
+async def get_airnow_observation(
+    location: str, date: Optional[str] = None, distance_miles: int = 15, is_fallback: bool = False,
+) -> Dict[str, Any]:
     """Retrieve current or recent unverified ground sensor observations from EPA AirNow.
 
-    Use this tool when queried for current air quality, today, yesterday, or dates within
+    Use this tool ONLY for current air quality, today, yesterday, or dates within
     the last 90 days where EPA AQS certification lag prevents data availability.
+    For dates older than 90 days, verified EPA AQS data is available — query EPA AQS
+    tools first, and only call this with is_fallback=True if EPA AQS returns no_data.
 
     Parameters
     ----------
@@ -187,7 +211,9 @@ async def get_airnow_observation(location: str, date: Optional[str] = None, dist
     date : Optional[str]
         Target date in YYYY-MM-DD format. If omitted or 'today', queries current observations.
     distance_miles : int
-        Search radius in miles around the geocoded coordinates (default: 25).
+        Search radius in miles around the geocoded coordinates (default: 15).
+    is_fallback : bool
+        Set to True if calling as a fallback after an EPA AQS query returned no_data.
     """
     geo_service = get_geocoding_service()
     geo = await geo_service.ageocode(location)
@@ -195,8 +221,9 @@ async def get_airnow_observation(location: str, date: Optional[str] = None, dist
         return {"Header": [{"status": "error", "message": f"Could not geocode location: '{location}'"}], "Body": []}
 
     lat, lon = geo["latitude"], geo["longitude"]
-    lat_delta = max(0.08, distance_miles / 69.0)
-    lon_delta = max(0.08, distance_miles / max(1.0, (69.0 * math.cos(math.radians(lat)))))
+    radius = min(max(5, distance_miles), 25)
+    lat_delta = max(0.08, radius / 69.0)
+    lon_delta = max(0.08, radius / max(1.0, (69.0 * math.cos(math.radians(lat)))))
     min_lat, max_lat = round(lat - lat_delta, 4), round(lat + lat_delta, 4)
     min_lon, max_lon = round(lon - lon_delta, 4), round(lon + lon_delta, 4)
     bbox = f"{min_lon},{min_lat},{max_lon},{max_lat}"
@@ -205,6 +232,20 @@ async def get_airnow_observation(location: str, date: Optional[str] = None, dist
     if date and date.strip().lower() not in {"today", "current", "now"}:
         try:
             target_dt = datetime.fromisoformat(date.strip().split("T")[0])
+            days_ago = (now_utc.date() - target_dt.date()).days
+            if days_ago > 90 and not is_fallback:
+                return {
+                    "Header": [{
+                        "status": "use_epa_aqs",
+                        "message": (
+                            f"Requested date '{date.strip()}' is {days_ago} days ago (>90 days). "
+                            "Verified, certified EPA AQS data is available. "
+                            "You must query EPA AQS tools (find_closest_monitor, then get_daily_summary) first. "
+                            "Only call get_airnow_observation(..., is_fallback=True) if EPA AQS returns no_data."
+                        ),
+                    }],
+                    "Body": [],
+                }
             start_str = target_dt.strftime("%Y-%m-%dT00")
             end_str = target_dt.strftime("%Y-%m-%dT23")
             ttl = CACHE_TTL_HISTORICAL
@@ -235,35 +276,72 @@ async def get_airnow_observation(location: str, date: Optional[str] = None, dist
             "Body": [],
         }
 
-    body: list[dict[str, Any]] = []
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for r in data:
         site_lat = r.get("Latitude", lat)
         site_lon = r.get("Longitude", lon)
-        param = r.get("Parameter") or r.get("ParameterName") or "AQI"
-        unit = r.get("Unit") or "PPB"
-        raw_val = r.get("Value")
-        aqi_val = r.get("AQI")
-        val = raw_val if raw_val is not None and raw_val != -999 else aqi_val
-        site_name = r.get("SiteName") or r.get("ReportingArea") or r.get("AgencyName") or location
-        site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
+        try:
+            dist = _haversine_miles(lat, lon, float(site_lat), float(site_lon))
+        except (TypeError, ValueError):
+            dist = 0.0
 
-        body.append({
-            "site_id": site_code,
-            "local_site_name": site_name,
-            "displayName": f"{site_name} ({param})",
-            "latitude": site_lat,
-            "longitude": site_lon,
-            "parameter": param,
-            "pollutant_standard": f"AirNow {param} ({unit})",
-            "mean": val,
-            "max": val,
-            "primaryVal": val,
-            "aqi": aqi_val,
-            "category": str(r.get("Category", "")),
-            "units": unit,
-            "date": r.get("UTC", ""),
-            "verified": False,
-        })
+        if dist > radius:
+            continue
+
+        param = r.get("Parameter") or r.get("ParameterName") or "AQI"
+        site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
+        site_name = r.get("SiteName") or r.get("ReportingArea") or r.get("AgencyName") or location
+        unit = r.get("Unit") or "PPB"
+        key = (site_code, param)
+
+        val = _clean_val(r.get("Value"))
+        aqi_val = _clean_val(r.get("AQI"))
+
+        if key not in grouped:
+            grouped[key] = {
+                "site_id": site_code,
+                "local_site_name": site_name,
+                "displayName": f"{site_name} ({param})",
+                "latitude": site_lat,
+                "longitude": site_lon,
+                "parameter": param,
+                "pollutant_standard": f"AirNow {param} ({unit})",
+                "units": unit,
+                "category": str(r.get("Category", "")),
+                "date": r.get("UTC", ""),
+                "verified": False,
+                "distance_miles": round(dist, 1),
+                "values": [val] if val is not None else [],
+                "aqis": [aqi_val] if aqi_val is not None else [],
+            }
+        else:
+            if val is not None:
+                grouped[key]["values"].append(val)
+            if aqi_val is not None:
+                grouped[key]["aqis"].append(aqi_val)
+
+    body: list[dict[str, Any]] = []
+    min_dist = min((g["distance_miles"] for g in grouped.values()), default=999.0)
+    max_allowed_dist = 10.0 if min_dist <= 6.0 else radius
+
+    for g in grouped.values():
+        if g["distance_miles"] > max_allowed_dist:
+            continue
+        vals = g["values"]
+        aqis = g["aqis"]
+        mean_v = round(sum(vals) / len(vals), 2) if vals else None
+        max_v = max(vals) if vals else None
+        aqi_v = max(aqis) if aqis else None
+        primary_v = mean_v if mean_v is not None else (max_v if max_v is not None else aqi_v)
+
+        entry = {k: v for k, v in g.items() if k not in ("values", "aqis")}
+        entry["mean"] = primary_v
+        entry["max"] = max_v
+        entry["primaryVal"] = primary_v
+        entry["aqi"] = aqi_v
+        body.append(entry)
+
+    body.sort(key=lambda x: x.get("distance_miles", 0.0))
 
     title = f"AirNow Observations - {location}"
     header = [{
@@ -279,12 +357,16 @@ async def get_airnow_observation(location: str, date: Optional[str] = None, dist
 
 @tool
 async def get_airnow_area_data(
-    location: str, date: Optional[str] = None, parameters: Optional[str] = None, distance_miles: int = 40,
+    location: str,
+    date: Optional[str] = None,
+    parameters: Optional[str] = None,
+    distance_miles: int = 30,
+    is_fallback: bool = False,
 ) -> Dict[str, Any]:
     """Retrieve multi-station raw air quality monitoring records across an area from EPA AirNow.
 
     Provides observations suitable for station mapping across a region within the recent
-    unverified window.
+    unverified window. For dates older than 90 days, verified EPA AQS data is available.
 
     Parameters
     ----------
@@ -295,7 +377,9 @@ async def get_airnow_area_data(
     parameters : Optional[str]
         Comma-separated pollutant codes: 'O3,PM25,NO2,CO,SO2' (defaults to 'O3,PM25').
     distance_miles : int
-        Radius in miles to compute the search bounding box (default: 40).
+        Radius in miles to compute the search bounding box (default: 30).
+    is_fallback : bool
+        Set to True if calling as a fallback after an EPA AQS query returned no_data.
     """
     geo_service = get_geocoding_service()
     geo = await geo_service.ageocode(location)
@@ -303,8 +387,9 @@ async def get_airnow_area_data(
         return {"Header": [{"status": "error", "message": f"Could not geocode location: '{location}'"}], "Body": []}
 
     lat, lon = geo["latitude"], geo["longitude"]
-    lat_delta = max(0.1, distance_miles / 69.0)
-    lon_delta = max(0.1, distance_miles / max(1.0, (69.0 * math.cos(math.radians(lat)))))
+    radius = min(max(5, distance_miles), 50)
+    lat_delta = max(0.1, radius / 69.0)
+    lon_delta = max(0.1, radius / max(1.0, (69.0 * math.cos(math.radians(lat)))))
     min_lat, max_lat = round(lat - lat_delta, 4), round(lat + lat_delta, 4)
     min_lon, max_lon = round(lon - lon_delta, 4), round(lon + lon_delta, 4)
     bbox = f"{min_lon},{min_lat},{max_lon},{max_lat}"
@@ -313,6 +398,20 @@ async def get_airnow_area_data(
     if date and date.strip().lower() not in {"today", "current", "now"}:
         try:
             target_dt = datetime.fromisoformat(date.strip().split("T")[0])
+            days_ago = (now_utc.date() - target_dt.date()).days
+            if days_ago > 90 and not is_fallback:
+                return {
+                    "Header": [{
+                        "status": "use_epa_aqs",
+                        "message": (
+                            f"Requested date '{date.strip()}' is {days_ago} days ago (>90 days). "
+                            "Verified, certified EPA AQS data is available. "
+                            "You must query EPA AQS tools (find_closest_monitor, then get_daily_summary) first. "
+                            "Only call get_airnow_area_data(..., is_fallback=True) if EPA AQS returns no_data."
+                        ),
+                    }],
+                    "Body": [],
+                }
             start_str = target_dt.strftime("%Y-%m-%dT00")
             end_str = target_dt.strftime("%Y-%m-%dT23")
         except ValueError:
@@ -341,35 +440,67 @@ async def get_airnow_area_data(
             "Body": [],
         }
 
-    body: list[dict[str, Any]] = []
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for r in data:
-        site_lat = r.get("Latitude")
-        site_lon = r.get("Longitude")
-        param = r.get("Parameter") or r.get("ParameterName") or "AQI"
-        unit = r.get("Unit") or "PPB"
-        raw_val = r.get("Value")
-        aqi_val = r.get("AQI")
-        val = raw_val if raw_val is not None and raw_val != -999 else aqi_val
-        site_name = r.get("SiteName") or r.get("ReportingArea") or r.get("AgencyName") or "Monitor"
-        site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
+        site_lat = r.get("Latitude", lat)
+        site_lon = r.get("Longitude", lon)
+        try:
+            dist = _haversine_miles(lat, lon, float(site_lat), float(site_lon))
+        except (TypeError, ValueError):
+            dist = 0.0
 
-        body.append({
-            "site_id": site_code,
-            "local_site_name": site_name,
-            "displayName": f"{site_name} ({param})",
-            "latitude": site_lat,
-            "longitude": site_lon,
-            "parameter": param,
-            "pollutant_standard": f"AirNow {param} ({unit})",
-            "mean": val,
-            "max": val,
-            "primaryVal": val,
-            "aqi": aqi_val,
-            "category": str(r.get("Category", "")),
-            "units": unit,
-            "date": r.get("UTC", ""),
-            "verified": False,
-        })
+        if dist > radius:
+            continue
+
+        param = r.get("Parameter") or r.get("ParameterName") or "AQI"
+        site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
+        site_name = r.get("SiteName") or r.get("ReportingArea") or r.get("AgencyName") or "Monitor"
+        unit = r.get("Unit") or "PPB"
+        key = (site_code, param)
+
+        val = _clean_val(r.get("Value"))
+        aqi_val = _clean_val(r.get("AQI"))
+
+        if key not in grouped:
+            grouped[key] = {
+                "site_id": site_code,
+                "local_site_name": site_name,
+                "displayName": f"{site_name} ({param})",
+                "latitude": site_lat,
+                "longitude": site_lon,
+                "parameter": param,
+                "pollutant_standard": f"AirNow {param} ({unit})",
+                "units": unit,
+                "category": str(r.get("Category", "")),
+                "date": r.get("UTC", ""),
+                "verified": False,
+                "distance_miles": round(dist, 1),
+                "values": [val] if val is not None else [],
+                "aqis": [aqi_val] if aqi_val is not None else [],
+            }
+        else:
+            if val is not None:
+                grouped[key]["values"].append(val)
+            if aqi_val is not None:
+                grouped[key]["aqis"].append(aqi_val)
+
+    body: list[dict[str, Any]] = []
+    for g in grouped.values():
+        vals = g["values"]
+        aqis = g["aqis"]
+        mean_v = round(sum(vals) / len(vals), 2) if vals else None
+        max_v = max(vals) if vals else None
+        aqi_v = max(aqis) if aqis else None
+        primary_v = mean_v if mean_v is not None else (max_v if max_v is not None else aqi_v)
+
+        entry = {k: v for k, v in g.items() if k not in ("values", "aqis")}
+        entry["mean"] = primary_v
+        entry["max"] = max_v
+        entry["primaryVal"] = primary_v
+        entry["aqi"] = aqi_v
+        body.append(entry)
+
+    body.sort(key=lambda x: x.get("distance_miles", 0.0))
 
     title = f"AirNow Regional Stations - {location}"
     header = [{

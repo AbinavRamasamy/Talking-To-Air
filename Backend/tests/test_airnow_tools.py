@@ -155,3 +155,52 @@ async def test_get_airnow_area_data_success(mock_geocoding, mock_settings):
         assert res["Body"][0]["displayName"] == "Newark Lab (O3)"
         assert res["Body"][0]["primaryVal"] == 35.0
 
+
+@pytest.mark.asyncio
+async def test_airnow_negative_999_cleaned_to_none(mock_geocoding, mock_settings):
+    mock_data = [
+        {
+            "Latitude": 40.73,
+            "Longitude": -74.17,
+            "UTC": "2024-05-01T21:00",
+            "Parameter": "NO2",
+            "Unit": "PPB",
+            "Value": -999.0,
+            "AQI": -999,
+            "SiteName": "Newark Chestnut",
+            "FullAQSCode": "340130005",
+        }
+    ]
+
+    with patch("tta_backend.tools.ground_sensor_tools.airnow_tools._fetch_airnow", new_callable=AsyncMock) as mock_fetch, \
+         patch("tta_backend.tools.ground_sensor_tools.airnow_tools.artifact_store.put_table") as mock_put_table:
+
+        mock_fetch.return_value = mock_data
+        fake_ref = MagicMock(id="tbl_clean_999")
+        fake_ref.model_dump.return_value = {"id": "tbl_clean_999", "type": "table"}
+        mock_put_table.return_value = fake_ref
+
+        res = await get_airnow_observation.ainvoke({"location": "Newark, NJ"})
+        assert len(res["Body"]) == 1
+        assert res["Body"][0]["mean"] is None
+        assert res["Body"][0]["max"] is None
+        assert res["Body"][0]["primaryVal"] is None
+        assert res["Body"][0]["aqi"] is None
+
+
+@pytest.mark.asyncio
+async def test_airnow_date_older_than_90_days_routes_to_epa_aqs(mock_geocoding, mock_settings):
+    # Feb 6 2026 is > 90 days before Nov 2026
+    res = await get_airnow_observation.ainvoke({"location": "Rutgers, NJ", "date": "2026-02-06"})
+    assert res["Header"][0]["status"] == "use_epa_aqs"
+    assert "Verified, certified EPA AQS data is available" in res["Header"][0]["message"]
+    assert res["Body"] == []
+
+    # With is_fallback=True, it allows calling AirNow
+    with patch("tta_backend.tools.ground_sensor_tools.airnow_tools._fetch_airnow", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = []
+        res_fb = await get_airnow_observation.ainvoke({
+            "location": "Rutgers, NJ", "date": "2026-02-06", "is_fallback": True
+        })
+        assert res_fb["Header"][0]["status"] == "no_data"
+
