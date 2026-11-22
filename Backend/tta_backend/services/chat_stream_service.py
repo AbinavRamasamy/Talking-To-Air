@@ -11,6 +11,8 @@ from typing import Any, AsyncIterator, Literal
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from tta_backend.config.error_templates import (
+    CATEGORY_PROVIDER_UNAVAILABLE,
+    CATEGORY_RATE_LIMITED,
     render_error_answer,
     render_overloaded_answer,
     render_turn_timeout_answer,
@@ -168,7 +170,21 @@ class ChatStreamService:
         if isinstance(exc, admission.AdmissionOverloaded):
             return list(self._overloaded_events(request_id, thread_id))
         logger.exception("agent_failure", extra={"_request_id": request_id, "_thread_id": thread_id})
-        detail = render_error_answer(CATEGORY_CONTRACT, "request")
+        err_msg = str(exc)
+        if "503" in err_msg or "UNAVAILABLE" in err_msg or "high demand" in err_msg:
+            detail = render_error_answer(
+                CATEGORY_PROVIDER_UNAVAILABLE,
+                "language model",
+                "The Gemini API is currently experiencing high demand upstream (503 Service Unavailable). Spikes in demand are temporary",
+            )
+        elif "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "rate limit" in err_msg:
+            detail = render_error_answer(
+                CATEGORY_RATE_LIMITED,
+                "language model",
+                "Gemini API rate limit reached",
+            )
+        else:
+            detail = render_error_answer(CATEGORY_CONTRACT, "request")
         try:
             from tta_backend.tools.ground_sensor_tools.airnow_tools import get_last_airnow_raw_json_snippet
             raw_snippet = get_last_airnow_raw_json_snippet()

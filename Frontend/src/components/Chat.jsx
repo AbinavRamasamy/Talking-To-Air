@@ -287,7 +287,7 @@ function ReloadSessionButton({ onReloadSession }) {
 function MessageBubble({
   msg, onFollowupClick, focusedOutput, onFocusOutput,
   compareMode, compareSelection, onToggleCompareSlot, onCompareCapFull,
-  onReloadSession,
+  onReloadSession, isLatestAssistant,
 }) {
   const isUser = msg.role === 'user'
   const comparing = compareMode === 'active'
@@ -491,7 +491,7 @@ function MessageBubble({
 
         {/* Follow-up suggestions grounded in this turn's answer —
             clicking one sends it through the same path as typing. */}
-        {!isUser && !msg.isLoading && (
+        {isLatestAssistant && !isUser && !msg.isLoading && (
           <FollowupChips suggestions={msg.suggestedFollowups} onSend={onFollowupClick} />
         )}
       </div>
@@ -783,30 +783,40 @@ export default function Chat({
           <EmptyState onChipClick={handleSend} />
         ) : (
           <div style={{ padding: '20px 20px 8px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {messages.map((msg, i) =>
-              msg.isLoading ? (
-                <LoadingMessage
-                  key={i}
-                  toolCalls={msg.toolCalls}
-                  statusMessage={msg.statusMessage}
-                  workflowStage={msg.workflowStage}
-                  startedAt={msg.startedAt}
-                />
-              ) : (
-                <MessageBubble
-                  key={i}
-                  msg={msg}
-                  onFollowupClick={handleSend}
-                  focusedOutput={focusedOutput}
-                  onFocusOutput={onFocusOutput}
-                  compareMode={compareMode}
-                  compareSelection={compareSelection}
-                  onToggleCompareSlot={onToggleCompareSlot}
-                  onCompareCapFull={showCapFullHint}
-                  onReloadSession={onReloadSession}
-                />
+            {(() => {
+              let lastAssistantIdx = -1
+              for (let idx = messages.length - 1; idx >= 0; idx--) {
+                if (messages[idx]?.role === 'assistant') {
+                  lastAssistantIdx = idx
+                  break
+                }
+              }
+              return messages.map((msg, i) =>
+                msg.isLoading ? (
+                  <LoadingMessage
+                    key={i}
+                    toolCalls={msg.toolCalls}
+                    statusMessage={msg.statusMessage}
+                    workflowStage={msg.workflowStage}
+                    startedAt={msg.startedAt}
+                  />
+                ) : (
+                  <MessageBubble
+                    key={i}
+                    msg={msg}
+                    onFollowupClick={handleSend}
+                    focusedOutput={focusedOutput}
+                    onFocusOutput={onFocusOutput}
+                    compareMode={compareMode}
+                    compareSelection={compareSelection}
+                    onToggleCompareSlot={onToggleCompareSlot}
+                    onCompareCapFull={showCapFullHint}
+                    onReloadSession={onReloadSession}
+                    isLatestAssistant={i === lastAssistantIdx}
+                  />
+                )
               )
-            )}
+            })()}
             <div style={{ height: '8px' }} />
           </div>
         )}

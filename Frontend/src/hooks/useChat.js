@@ -740,7 +740,7 @@ export function useChat(onJobProgress) {
     let streaming = false
 
     setMessages(prev => [
-      ...prev,
+      ...prev.map(m => (m.suggestedFollowups?.length ? { ...m, suggestedFollowups: [] } : m)),
       { role: 'user', content: text },
       assistantPlaceholder(streamId),
     ])
