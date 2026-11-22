@@ -99,10 +99,40 @@ function MapColorbar({ minVal, maxVal, units, title = 'EPA Ground Monitors' }) {
   )
 }
 
+function normalizeParam(r) {
+  if (!r) return { key: 'OTHER', label: 'Other', defaultUnit: '' }
+  const rawParam = String(r.parameter || r.parameter_name || r.pollutant || r.param_name || '').trim()
+  const rawCode = String(r.parameter_code || r.param_code || '').trim()
+  const p = rawParam.toUpperCase()
+
+  if (rawCode === '44201' || p === 'O3' || p === 'OZONE') {
+    return { key: 'O3', label: 'Ozone (O₃)', defaultUnit: r.units || 'PPB' }
+  }
+  if (rawCode === '88101' || rawCode === '88502' || p === 'PM25' || p === 'PM2.5' || p.includes('PM2.5')) {
+    return { key: 'PM25', label: 'PM₂.₅', defaultUnit: r.units || 'UG/M3' }
+  }
+  if (rawCode === '81102' || p === 'PM10' || p.includes('PM10')) {
+    return { key: 'PM10', label: 'PM₁₀', defaultUnit: r.units || 'UG/M3' }
+  }
+  if (rawCode === '42602' || p === 'NO2' || p.includes('NITROGEN DIOXIDE')) {
+    return { key: 'NO2', label: 'NO₂', defaultUnit: r.units || 'PPB' }
+  }
+  if (rawCode === '42401' || p === 'SO2' || p.includes('SULFUR DIOXIDE')) {
+    return { key: 'SO2', label: 'SO₂', defaultUnit: r.units || 'PPB' }
+  }
+  if (rawCode === '42101' || p === 'CO' || p.includes('CARBON MONOXIDE')) {
+    return { key: 'CO', label: 'CO', defaultUnit: r.units || 'PPM' }
+  }
+
+  const key = rawParam || rawCode || 'Other'
+  return { key, label: key, defaultUnit: r.units || '' }
+}
+
 export default function TableMapPanel({ artifact, height = 480, isCompare = false }) {
   const inlineRows = artifact?.rows?.length ? artifact.rows : null
   const [fetched, setFetched] = useState({ id: null, rows: NO_ROWS, error: null })
   const [selectedSiteId, setSelectedSiteId] = useState(null)
+  const [selectedParamKey, setSelectedParamKey] = useState(null)
 
   const containerRef = useRef(null)
   const mapRef = useRef(null)
@@ -135,9 +165,47 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
   const error = !inlineRows && fetchedThis ? fetched.error : null
   const loading = !inlineRows && Boolean(artifact?.id) && !fetchedThis
 
-  // 2. Filter rows with valid coordinates and combine rows by unique monitor station location
-  const monitors = useMemo(() => {
+  // 2. Extract available pollutant parameters across rows
+  const availableParameters = useMemo(() => {
     if (!rows || !rows.length) return []
+    const map = new Map()
+    for (const r of rows) {
+      const norm = normalizeParam(r)
+      const unit = r.units || norm.defaultUnit || ''
+      if (!map.has(norm.key)) {
+        map.set(norm.key, {
+          key: norm.key,
+          label: norm.label,
+          unit,
+          count: 1,
+        })
+      } else {
+        const item = map.get(norm.key)
+        item.count++
+        if (!item.unit && unit) item.unit = unit
+      }
+    }
+    return Array.from(map.values())
+  }, [rows])
+
+  const activeParamKey = useMemo(() => {
+    if (!availableParameters.length) return null
+    if (selectedParamKey && availableParameters.some(p => p.key === selectedParamKey)) {
+      return selectedParamKey
+    }
+    return availableParameters[0].key
+  }, [availableParameters, selectedParamKey])
+
+  // Filter rows by the active pollutant parameter to avoid mixing units
+  const filteredRows = useMemo(() => {
+    if (!rows || !rows.length) return []
+    if (!activeParamKey || availableParameters.length <= 1) return rows
+    return rows.filter(r => normalizeParam(r).key === activeParamKey)
+  }, [rows, activeParamKey, availableParameters.length])
+
+  // 3. Filter rows with valid coordinates and combine rows by unique monitor station location
+  const monitors = useMemo(() => {
+    if (!filteredRows || !filteredRows.length) return []
 
     const parseNum = (v) => {
       if (v == null || v === '' || v === '—') return null
@@ -147,7 +215,7 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
 
     const stationsMap = new Map()
 
-    for (const r of rows) {
+    for (const r of filteredRows) {
       const lat = Number(r.latitude)
       const lon = Number(r.longitude)
       if (isNaN(lat) || isNaN(lon) || lat === 0 || lon === 0) continue
@@ -201,18 +269,20 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
         parameter_list: Array.from(st.parameters).join(', '),
       }
     })
-  }, [rows])
+  }, [filteredRows])
 
   // Summary statistics
-  const { minVal, maxVal, spatialMean, peakMonitor, lowestMonitor, units } = useMemo(() => {
+  const { minVal, maxVal, spatialMean, peakMonitor, lowestMonitor, units, pollutant } = useMemo(() => {
     const validVals = monitors.map(m => m.primaryVal).filter(v => v != null && v > -900)
     const min = validVals.length ? Math.min(...validVals) : 0
     const max = validVals.length ? Math.max(...validVals) : 1
     const mean = validVals.length ? (validVals.reduce((acc, v) => acc + v, 0) / validVals.length) : 0
     const peakMon = monitors.find(m => m.primaryVal === max) || null
     const lowMon = monitors.find(m => m.primaryVal === min) || null
-    const u = monitors.find(m => m.units)?.units || ''
-    const p = monitors.find(m => m.pollutant_standard)?.pollutant_standard || artifact?.title || 'Air Quality'
+
+    const activeParam = availableParameters.find(p => p.key === activeParamKey)
+    const u = monitors.find(m => m.units)?.units || activeParam?.unit || ''
+    const p = activeParam ? `${activeParam.label} Ground Monitors` : (artifact?.title || 'Air Quality')
     return {
       minVal: min,
       maxVal: max,
@@ -222,7 +292,7 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
       units: u,
       pollutant: p,
     }
-  }, [monitors, artifact?.title])
+  }, [monitors, activeParamKey, availableParameters, artifact?.title])
 
   // Helper to open station popup
   const openStationPopup = (m, mapInstance = mapRef.current) => {
@@ -456,6 +526,76 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
 
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Pollutant Parameter Radio Selection Area */}
+      {availableParameters.length > 1 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            borderRadius: '8px',
+            padding: '8px 12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              Ground Pollutant:
+            </span>
+            <span style={{ fontSize: '11px', color: 'var(--text-hint)' }}>
+              (select to isolate specific parameter and units)
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {availableParameters.map(p => {
+              const isSelected = activeParamKey === p.key
+              return (
+                <label
+                  key={p.key}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: isSelected ? 700 : 500,
+                    cursor: 'pointer',
+                    background: isSelected ? 'var(--bg-card)' : 'transparent',
+                    border: `1px solid ${isSelected ? 'var(--teal)' : 'transparent'}`,
+                    color: isSelected ? 'var(--teal-text)' : 'var(--text-secondary)',
+                    boxShadow: isSelected ? 'var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.06))' : 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="ground-data-pollutant"
+                    value={p.key}
+                    checked={isSelected}
+                    onChange={() => {
+                      setSelectedParamKey(p.key)
+                      setSelectedSiteId(null)
+                    }}
+                    style={{ cursor: 'pointer', accentColor: 'var(--teal)' }}
+                  />
+                  <span>{p.label}</span>
+                  {p.unit && (
+                    <span style={{ fontSize: '10px', opacity: 0.8, fontFamily: 'var(--font-mono)' }}>
+                      [{p.unit}]
+                    </span>
+                  )}
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* MapLibre container matching MapLibreHeatmapPanel structure */}
       <div style={{
         position: 'relative',
@@ -472,7 +612,7 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
           minVal={minVal}
           maxVal={maxVal}
           units={units}
-          title="EPA Ground Monitors"
+          title={pollutant}
         />
       </div>
 
