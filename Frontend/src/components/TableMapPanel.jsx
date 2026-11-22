@@ -527,7 +527,7 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
       {/* Pollutant Parameter Radio Selection Area */}
-      {availableParameters.length > 1 && (
+      {availableParameters.length > 0 && (
         <div
           style={{
             display: 'flex',
