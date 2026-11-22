@@ -24,5 +24,68 @@ export function isReachableArtifact(artifact, charts) {
 }
 
 export function reachableArtifacts(msg) {
-  return (msg?.artifacts || []).filter(artifact => isReachableArtifact(artifact, msg?.charts))
+  const list = (msg?.artifacts || []).filter(artifact => isReachableArtifact(artifact, msg?.charts))
+  if (list.length <= 1) return list
+
+  const merged = []
+  const groundTablesByKey = new Map()
+
+  for (const art of list) {
+    if (art.type === 'table') {
+      const meta = art.metadata || {}
+      const baseTitle = String(art.title || '').replace(/\s*\([^)]*\)$/, '').trim().toLowerCase()
+      const loc = String(meta.location || meta.site_id || baseTitle).trim().toLowerCase()
+      const dataset = String(meta.dataset || '').trim().toLowerCase()
+      const isGround = Boolean(meta.has_coordinates || dataset.includes('epa') || meta.query_type)
+
+      if (isGround && (loc || baseTitle)) {
+        const key = `${dataset}::${loc || baseTitle}`
+        if (!groundTablesByKey.has(key)) {
+          groundTablesByKey.set(key, [art])
+        } else {
+          groundTablesByKey.get(key).push(art)
+        }
+        continue
+      }
+    }
+    merged.push(art)
+  }
+
+  for (const group of groundTablesByKey.values()) {
+    if (group.length === 1) {
+      merged.push(group[0])
+    } else {
+      const first = group[0]
+      const cleanTitle = String(first.title || '').replace(/\s*\([^)]*\)$/, '').trim()
+      const allMergedIds = group.map(g => g.id).filter(Boolean)
+      const totalRows = group.reduce((sum, g) => sum + (g.row_count ?? g.rows?.length ?? 0), 0)
+      const combinedRows = group.some(g => g.rows?.length) ? group.flatMap(g => g.rows || []) : null
+      const pollutants = []
+      for (const g of group) {
+        const p = g.metadata?.pollutant
+        if (p && p !== 'ALL') {
+          for (const sub of String(p).split(',')) {
+            const clean = sub.trim()
+            if (clean && !pollutants.includes(clean)) pollutants.push(clean)
+          }
+        }
+      }
+
+      merged.push({
+        ...first,
+        id: first.id,
+        merged_ids: allMergedIds,
+        title: pollutants.length ? `${cleanTitle} (${pollutants.join(', ')})` : cleanTitle,
+        row_count: totalRows,
+        rows: combinedRows,
+        metadata: {
+          ...first.metadata,
+          pollutant: pollutants.length ? pollutants.join(',') : first.metadata?.pollutant,
+          merged_artifact_ids: allMergedIds,
+        },
+      })
+    }
+  }
+
+  return merged
 }

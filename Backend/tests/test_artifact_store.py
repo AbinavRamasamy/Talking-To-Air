@@ -188,5 +188,33 @@ class UnclaimedArtifactOwnershipTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(owned.title, "Secret Table")
 
+    async def test_merge_tables_combines_rows_and_metadata(self):
+        from tta_backend.services.artifact_store import ArtifactStore
+
+        fake_repo = FakeArtifactRepository()
+        store = ArtifactStore()
+        ref1 = store.put_table(
+            "AirNow Observations - Rutgers (O3)",
+            ["site_id", "parameter", "mean"],
+            [{"site_id": "34-023-0011", "parameter": "O3", "mean": 25.0}],
+            metadata={"dataset": "EPA AirNow (Preliminary)", "location": "Rutgers", "pollutant": "O3"},
+        )
+        ref2 = store.put_table(
+            "AirNow Observations - Rutgers (PM25)",
+            ["site_id", "parameter", "mean"],
+            [{"site_id": "34-023-0011", "parameter": "PM25", "mean": 12.0}],
+            metadata={"dataset": "EPA AirNow (Preliminary)", "location": "Rutgers", "pollutant": "PM25"},
+        )
+
+        with patch("tta_backend.services.artifact_store.artifact_repository", fake_repo):
+            merged_ref = await store.merge_tables([ref1.id, ref2.id], "owner", "thread-1")
+
+        self.assertIn(merged_ref.id, fake_repo.rows)
+        row = fake_repo.rows[merged_ref.id]
+        self.assertEqual(row["user_id"], "owner")
+        self.assertEqual(len(row["rows"]), 2)
+        self.assertEqual(row["metadata"]["pollutant"], "O3,PM25")
+        self.assertIn("AirNow Observations - Rutgers", merged_ref.title)
+
 if __name__ == "__main__":
     unittest.main()

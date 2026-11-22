@@ -143,13 +143,23 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
     if (inlineRows || !artifact?.id) return undefined
     let cancelled = false
     const id = artifact.id
-    apiFetch(`${API_BASE}/artifacts/${id}?offset=0&limit=500`)
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.json()
-      })
-      .then(data => {
-        if (!cancelled) setFetched({ id, rows: data.rows || NO_ROWS, error: null })
+    const ids = artifact.merged_ids?.length ? artifact.merged_ids : [id]
+
+    Promise.all(
+      ids.map(fetchId =>
+        apiFetch(`${API_BASE}/artifacts/${fetchId}?offset=0&limit=500`)
+          .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            return res.json()
+          })
+          .then(d => d.rows || [])
+      )
+    )
+      .then(rowLists => {
+        if (!cancelled) {
+          const combined = rowLists.flat()
+          setFetched({ id, rows: combined.length ? combined : NO_ROWS, error: null })
+        }
       })
       .catch(err => {
         if (!cancelled) setFetched({ id, rows: NO_ROWS, error: err.message || 'Failed to load table data' })
@@ -158,7 +168,7 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
     return () => {
       cancelled = true
     }
-  }, [artifact?.id, inlineRows])
+  }, [artifact?.id, artifact?.merged_ids, inlineRows])
 
   const fetchedThis = fetched.id === artifact?.id
   const rows = inlineRows || (fetchedThis ? fetched.rows : NO_ROWS)
@@ -546,7 +556,7 @@ export default function TableMapPanel({ artifact, height = 480, isCompare = fals
               Ground Pollutant:
             </span>
             <span style={{ fontSize: '11px', color: 'var(--text-hint)' }}>
-              (select to isolate specific parameter and units)
+              (select to isolate specific parameter/units)
             </span>
           </div>
 

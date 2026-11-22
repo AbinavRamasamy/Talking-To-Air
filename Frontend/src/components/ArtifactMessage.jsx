@@ -200,12 +200,42 @@ export function TableArtifactMessage({ artifact }) {
       setStatus('loading')
       setError('')
       try {
-        const response = await apiFetch(`${API_BASE}/artifacts/${artifact.id}?offset=${offset}&limit=${PAGE_SIZE}`)
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const data = await response.json()
-        if (!cancelled) {
-          setPage(data)
-          setStatus('ready')
+        const ids = artifact.merged_ids?.length ? artifact.merged_ids : [artifact.id]
+        if (ids.length === 1) {
+          const response = await apiFetch(`${API_BASE}/artifacts/${artifact.id}?offset=${offset}&limit=${PAGE_SIZE}`)
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          const data = await response.json()
+          if (!cancelled) {
+            setPage(data)
+            setStatus('ready')
+          }
+        } else {
+          const results = await Promise.all(
+            ids.map(id =>
+              apiFetch(`${API_BASE}/artifacts/${id}?offset=0&limit=500`).then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                return r.json()
+              })
+            )
+          )
+          if (!cancelled) {
+            const combinedColumns = []
+            for (const res of results) {
+              for (const col of res.columns || []) {
+                if (!combinedColumns.includes(col)) combinedColumns.push(col)
+              }
+            }
+            const allRows = results.flatMap(res => res.rows || [])
+            setPage({
+              id: artifact.id,
+              columns: combinedColumns,
+              rows: allRows.slice(offset, offset + PAGE_SIZE),
+              total_rows: allRows.length,
+              offset,
+              limit: PAGE_SIZE,
+            })
+            setStatus('ready')
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -218,7 +248,7 @@ export function TableArtifactMessage({ artifact }) {
     return () => {
       cancelled = true
     }
-  }, [artifact?.id, artifact?.type, offset])
+  }, [artifact?.id, artifact?.type, artifact?.merged_ids, offset])
 
   const visibleColumns = useMemo(() => (
     page.columns?.length

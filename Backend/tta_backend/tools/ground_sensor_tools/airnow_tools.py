@@ -204,6 +204,20 @@ def _normalize_airnow_param(p: Optional[str]) -> str | None:
     return s
 
 
+def _parse_target_pollutants(pollutant: Optional[str]) -> set[str]:
+    if not pollutant or str(pollutant).strip().upper() in {"ALL", "ANY"}:
+        return set()
+    raw = str(pollutant).replace(" and ", ",").replace("&", ",").replace("+", ",").replace("/", ",")
+    targets = set()
+    for part in raw.split(","):
+        p_clean = part.strip()
+        if p_clean:
+            norm = _normalize_airnow_param(p_clean)
+            if norm:
+                targets.add(norm)
+    return targets
+
+
 def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     r = 3958.8
     dlat = math.radians(lat2 - lat1)
@@ -284,8 +298,8 @@ async def get_airnow_observation(
         end_str = now_utc.strftime("%Y-%m-%dT%H")
         ttl = CACHE_TTL_CURRENT
 
-    target_param = _normalize_airnow_param(pollutant)
-    params_str = target_param if target_param else "O3,PM25,NO2"
+    targets = _parse_target_pollutants(pollutant)
+    params_str = ",".join(sorted(targets)) if targets else "O3,PM25,NO2"
 
     query_params = {
         "startDate": start_str,
@@ -319,7 +333,7 @@ async def get_airnow_observation(
 
         param = r.get("Parameter") or r.get("ParameterName") or "AQI"
         norm_p = _normalize_airnow_param(param) or param
-        if target_param and norm_p != target_param:
+        if targets and norm_p not in targets:
             continue
         site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
         site_name = r.get("SiteName") or r.get("ReportingArea") or r.get("AgencyName") or location
@@ -386,7 +400,7 @@ async def get_airnow_observation(
 
     body.sort(key=lambda x: x.get("distance_miles", 0.0))
 
-    pollutant_title_part = f" ({target_param})" if target_param else ""
+    pollutant_title_part = f" ({', '.join(sorted(targets))})" if targets else ""
     title = f"AirNow Observations - {location}{pollutant_title_part}"
     header = [{
         "status": "success",
@@ -395,11 +409,11 @@ async def get_airnow_observation(
         "latitude": lat,
         "longitude": lon,
         "verified": False,
-        "pollutant": target_param or "ALL",
+        "pollutant": ",".join(sorted(targets)) if targets else "ALL",
     }]
     meta = {"location": location, "query_type": "observation"}
-    if target_param:
-        meta["pollutant"] = target_param
+    if targets:
+        meta["pollutant"] = ",".join(sorted(targets))
     return _build_artifact_response(header, body, title=title, metadata=meta)
 
 

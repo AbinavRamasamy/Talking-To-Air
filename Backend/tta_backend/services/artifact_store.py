@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -86,6 +87,74 @@ class ArtifactStore:
         # Defensive sweep in case a future write path changes that.
         await artifact_repository.delete_expired_unclaimed(self.ttl_seconds)
         return self._build_reference(artifact_id, stored)
+
+    async def merge_tables(
+        self,
+        artifact_ids: list[str],
+        user_id: str,
+        thread_id: str,
+        title: str | None = None,
+    ) -> ArtifactReference:
+        """Merge multiple sibling table artifacts into one unified table artifact.
+
+        Preserves all columns, appends rows, combines pollutant tags, and claims
+        the resulting merged artifact so it is persisted to Postgres.
+        """
+        if not artifact_ids:
+            raise ValueError("artifact_ids cannot be empty")
+        if len(artifact_ids) == 1:
+            return await self.claim(artifact_ids[0], user_id, thread_id)
+
+        stored_list: list[StoredArtifact] = []
+        for aid in artifact_ids:
+            try:
+                stored = await self._active_artifact(aid)
+                stored_list.append(stored)
+            except KeyError:
+                continue
+
+        if not stored_list:
+            raise KeyError(f"None of artifacts {artifact_ids} could be found")
+        if len(stored_list) == 1:
+            return await self.claim(artifact_ids[0], user_id, thread_id)
+
+        combined_columns: list[str] = []
+        for st in stored_list:
+            for col in st.payload.columns:
+                if col not in combined_columns:
+                    combined_columns.append(col)
+
+        combined_rows: list[dict[str, Any]] = []
+        for st in stored_list:
+            combined_rows.extend(st.payload.rows)
+
+        base_meta = dict(stored_list[0].payload.metadata)
+        pollutants: list[str] = []
+        for st in stored_list:
+            p = st.payload.metadata.get("pollutant")
+            if p and p != "ALL":
+                for sub_p in str(p).split(","):
+                    sub_clean = sub_p.strip()
+                    if sub_clean and sub_clean not in pollutants:
+                        pollutants.append(sub_clean)
+        if pollutants:
+            base_meta["pollutant"] = ",".join(pollutants)
+        base_meta["merged_artifact_ids"] = artifact_ids
+
+        if not title:
+            base_title = re.sub(r"\s*\([^)]*\)$", "", stored_list[0].payload.title).strip()
+            if pollutants:
+                title = f"{base_title} ({', '.join(pollutants)})"
+            else:
+                title = base_title
+
+        merged_ref = self.put_table(
+            title=title,
+            columns=combined_columns,
+            rows=combined_rows,
+            metadata=base_meta,
+        )
+        return await self.claim(merged_ref.id, user_id, thread_id)
 
     async def get_page(
         self,

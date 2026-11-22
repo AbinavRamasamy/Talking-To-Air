@@ -164,6 +164,58 @@ async def test_get_airnow_observation_specific_pollutant(mock_geocoding, mock_se
         assert fetch_args[1]["parameters"] == "O3"
 
 
+@pytest.mark.asyncio
+async def test_get_airnow_observation_multiple_pollutants(mock_geocoding, mock_settings):
+    mock_data = [
+        {
+            "ReportingArea": "Newark",
+            "Latitude": 40.73,
+            "Longitude": -74.17,
+            "ParameterName": "O3",
+            "AQI": 42,
+            "Value": 25.0,
+            "Unit": "PPB",
+        },
+        {
+            "ReportingArea": "Newark",
+            "Latitude": 40.73,
+            "Longitude": -74.17,
+            "ParameterName": "PM2.5",
+            "AQI": 35,
+            "Value": 10.0,
+            "Unit": "UG/M3",
+        },
+        {
+            "ReportingArea": "Newark",
+            "Latitude": 40.73,
+            "Longitude": -74.17,
+            "ParameterName": "NO2",
+            "AQI": 15,
+            "Value": 12.0,
+            "Unit": "PPB",
+        },
+    ]
+
+    with patch("tta_backend.tools.ground_sensor_tools.airnow_tools._fetch_airnow", new_callable=AsyncMock) as mock_fetch, \
+         patch("tta_backend.tools.ground_sensor_tools.airnow_tools.artifact_store.put_table") as mock_put_table:
+
+        mock_fetch.return_value = mock_data
+        fake_ref = MagicMock(id="tbl_airnow_multi")
+        fake_ref.model_dump.return_value = {"id": "tbl_airnow_multi", "type": "table"}
+        mock_put_table.return_value = fake_ref
+
+        res = await get_airnow_observation.ainvoke({"location": "Newark, NJ", "pollutant": "Ozone and PM2.5"})
+
+        assert res["Header"][0]["status"] == "success"
+        # Both Ozone and PM2.5 should be included, while NO2 is excluded
+        params = {r["parameter"] for r in res["Body"]}
+        assert params == {"O3", "PM2.5"}
+        assert len(res["Body"]) == 2
+        mock_fetch.assert_called_once()
+        fetch_args, _ = mock_fetch.call_args
+        assert fetch_args[1]["parameters"] == "O3,PM25"
+
+
 
 @pytest.mark.asyncio
 async def test_get_airnow_area_data_success(mock_geocoding, mock_settings):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -560,16 +561,43 @@ class ChatStreamService:
         # One result for a legacy ask_* message, one per item for a dispatch batch.
         agent_results = parse_tool_results(content)
         if agent_results:
+            table_groups: dict[tuple[str, str], list[Any]] = {}
+            other_artifacts: list[Any] = []
+
             for agent_result in agent_results:
                 for artifact_ref in agent_result.artifacts:
-                    payload = await self._resolve_artifact_payload(
-                        artifact_ref.model_dump(exclude_none=True), user_id, thread_id,
+                    ref_dict = artifact_ref.model_dump(exclude_none=True) if hasattr(artifact_ref, "model_dump") else artifact_ref
+                    if ref_dict.get("type") == "table":
+                        meta = ref_dict.get("metadata") or {}
+                        base_title = re.sub(r"\s*\([^)]*\)$", "", ref_dict.get("title") or "").strip().lower()
+                        loc = str(meta.get("location") or meta.get("site_id") or base_title).strip().lower()
+                        dataset = str(meta.get("dataset") or "").strip().lower()
+                        key = (dataset, loc)
+                        table_groups.setdefault(key, []).append(ref_dict)
+                    else:
+                        other_artifacts.append(ref_dict)
+
+            for group in table_groups.values():
+                if len(group) > 1:
+                    merged_ref = await artifact_store.merge_tables(
+                        [r["id"] for r in group if r.get("id")], user_id, thread_id,
                     )
-                    if payload is None:
-                        continue
+                    payload = merged_ref.model_dump(exclude_none=True)
+                else:
+                    payload = await self._resolve_artifact_payload(group[0], user_id, thread_id)
+                if payload is not None:
                     if artifacts is not None and payload not in artifacts:
                         artifacts.append(payload)
                     yield self.sse("artifact", payload)
+
+            for ref_dict in other_artifacts:
+                payload = await self._resolve_artifact_payload(ref_dict, user_id, thread_id)
+                if payload is not None:
+                    if artifacts is not None and payload not in artifacts:
+                        artifacts.append(payload)
+                    yield self.sse("artifact", payload)
+
+            for agent_result in agent_results:
                 for chart in agent_result.charts:
                     event = await self._emit_chart_once(thread_id, chart, user_id, emitted_chart_ids)
                     if event is not None:
@@ -600,14 +628,40 @@ class ChatStreamService:
             emitted_something = True
 
         if artifact_refs:
+            table_groups: dict[tuple[str, str], list[Any]] = {}
+            other_refs: list[Any] = []
             for ref in artifact_refs:
+                if ref.get("type") == "table":
+                    meta = ref.get("metadata") or {}
+                    base_title = re.sub(r"\s*\([^)]*\)$", "", ref.get("title") or "").strip().lower()
+                    loc = str(meta.get("location") or meta.get("site_id") or base_title).strip().lower()
+                    dataset = str(meta.get("dataset") or "").strip().lower()
+                    key = (dataset, loc)
+                    table_groups.setdefault(key, []).append(ref)
+                else:
+                    other_refs.append(ref)
+
+            for group in table_groups.values():
+                if len(group) > 1:
+                    merged_ref = await artifact_store.merge_tables(
+                        [r["id"] for r in group if r.get("id")], user_id, thread_id,
+                    )
+                    payload = merged_ref.model_dump(exclude_none=True)
+                else:
+                    payload = await self._resolve_artifact_payload(group[0], user_id, thread_id)
+                if payload is not None:
+                    if artifacts is not None and payload not in artifacts:
+                        artifacts.append(payload)
+                    emitted_something = True
+                    yield self.sse("artifact", payload)
+
+            for ref in other_refs:
                 payload = await self._resolve_artifact_payload(ref, user_id, thread_id)
-                if payload is None:
-                    continue
-                if artifacts is not None and payload not in artifacts:
-                    artifacts.append(payload)
-                emitted_something = True
-                yield self.sse("artifact", payload)
+                if payload is not None:
+                    if artifacts is not None and payload not in artifacts:
+                        artifacts.append(payload)
+                    emitted_something = True
+                    yield self.sse("artifact", payload)
 
         if emitted_something:
             return
