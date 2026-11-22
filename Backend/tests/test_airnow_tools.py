@@ -121,6 +121,51 @@ async def test_get_airnow_observation_success(mock_geocoding, mock_settings):
 
 
 @pytest.mark.asyncio
+async def test_get_airnow_observation_specific_pollutant(mock_geocoding, mock_settings):
+    mock_data = [
+        {
+            "ReportingArea": "Newark",
+            "Latitude": 40.73,
+            "Longitude": -74.17,
+            "ParameterName": "O3",
+            "AQI": 42,
+            "Value": 25.0,
+            "Unit": "PPB",
+        },
+        {
+            "ReportingArea": "Newark",
+            "Latitude": 40.73,
+            "Longitude": -74.17,
+            "ParameterName": "PM2.5",
+            "AQI": 35,
+            "Value": 10.0,
+            "Unit": "UG/M3",
+        },
+    ]
+
+    with patch("tta_backend.tools.ground_sensor_tools.airnow_tools._fetch_airnow", new_callable=AsyncMock) as mock_fetch, \
+         patch("tta_backend.tools.ground_sensor_tools.airnow_tools.artifact_store.put_table") as mock_put_table:
+
+        mock_fetch.return_value = mock_data
+        fake_ref = MagicMock(id="tbl_airnow_ozone_only")
+        fake_ref.model_dump.return_value = {"id": "tbl_airnow_ozone_only", "type": "table"}
+        mock_put_table.return_value = fake_ref
+
+        res = await get_airnow_observation.ainvoke({"location": "Newark, NJ", "pollutant": "Ozone"})
+
+        assert res["Header"][0]["status"] == "success"
+        # Only Ozone should be in the body, excluding PM2.5
+        assert len(res["Body"]) == 1
+        assert res["Body"][0]["parameter"] == "O3"
+        assert res["Body"][0]["units"] == "PPB"
+        # Ensure query params sent parameters="O3" to upstream API
+        mock_fetch.assert_called_once()
+        fetch_args, _ = mock_fetch.call_args
+        assert fetch_args[1]["parameters"] == "O3"
+
+
+
+@pytest.mark.asyncio
 async def test_get_airnow_area_data_success(mock_geocoding, mock_settings):
     mock_area_data = [
         {

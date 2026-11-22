@@ -84,7 +84,8 @@ split it into state_code/county_code/site_number; never pass the literal placeho
       * ONLY if EPA AQS returns `no_data` (empty response) for that historical date, then and only then call `get_airnow_observation(..., is_fallback=True)`.
     - FOR RECENT DATES (Real-time, today, yesterday, or within the last 90 days):
       * Certified EPA AQS data is not yet available due to the 2-3 month publication lag.
-      * Call `get_airnow_observation(location="...", date=..., distance_miles=15)` for a specific location.
+      * Call `get_airnow_observation(location="...", date=..., pollutant=..., distance_miles=15)` for a specific location.
+        Pass the specific requested pollutant (e.g. pollutant="O3", "PM2.5", "NO2") if the task names one; omit only if the request is for general air quality.
         Use a tight radius (default 10-15 miles) around the requested place to avoid pulling in distant monitors.
       * MANDATORY DISCLAIMER: Whenever presenting AirNow data, open with a clear, professional preliminary data notice:
         "Note: The following measurements are preliminary observations from EPA AirNow (subject to final state quality review and EPA certification):"

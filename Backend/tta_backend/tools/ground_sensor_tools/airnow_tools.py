@@ -185,6 +185,25 @@ def _clean_val(v: Any) -> float | None:
         return None
 
 
+def _normalize_airnow_param(p: Optional[str]) -> str | None:
+    if not p:
+        return None
+    s = str(p).strip().upper()
+    if s in {"O3", "OZONE", "44201"}:
+        return "O3"
+    if s in {"PM25", "PM2.5", "PM 2.5", "88101", "88502"}:
+        return "PM25"
+    if s in {"PM10", "PM 10", "81102"}:
+        return "PM10"
+    if s in {"NO2", "42602"}:
+        return "NO2"
+    if s in {"SO2", "42401"}:
+        return "SO2"
+    if s in {"CO", "42101"}:
+        return "CO"
+    return s
+
+
 def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     r = 3958.8
     dlat = math.radians(lat2 - lat1)
@@ -195,7 +214,11 @@ def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
 
 @tool
 async def get_airnow_observation(
-    location: str, date: Optional[str] = None, distance_miles: int = 15, is_fallback: bool = False,
+    location: str,
+    date: Optional[str] = None,
+    pollutant: Optional[str] = None,
+    distance_miles: int = 15,
+    is_fallback: bool = False,
 ) -> Dict[str, Any]:
     """Retrieve current or recent unverified ground sensor observations from EPA AirNow.
 
@@ -210,6 +233,9 @@ async def get_airnow_observation(
         City, state, or address (e.g., 'Newark, NJ', 'Los Angeles, CA') to geocode.
     date : Optional[str]
         Target date in YYYY-MM-DD format. If omitted or 'today', queries current observations.
+    pollutant : Optional[str]
+        Specific pollutant to retrieve: 'O3'/'Ozone', 'PM2.5'/'PM25', 'NO2', 'CO', 'SO2'.
+        If specified, only observations for this pollutant will be retrieved and returned.
     distance_miles : int
         Search radius in miles around the geocoded coordinates (default: 15).
     is_fallback : bool
@@ -258,10 +284,13 @@ async def get_airnow_observation(
         end_str = now_utc.strftime("%Y-%m-%dT%H")
         ttl = CACHE_TTL_CURRENT
 
+    target_param = _normalize_airnow_param(pollutant)
+    params_str = target_param if target_param else "O3,PM25,NO2"
+
     query_params = {
         "startDate": start_str,
         "endDate": end_str,
-        "parameters": "O3,PM25,NO2",
+        "parameters": params_str,
         "BBOX": bbox,
         "dataType": "B",
         "verbose": 1,
@@ -289,6 +318,9 @@ async def get_airnow_observation(
             continue
 
         param = r.get("Parameter") or r.get("ParameterName") or "AQI"
+        norm_p = _normalize_airnow_param(param) or param
+        if target_param and norm_p != target_param:
+            continue
         site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
         site_name = r.get("SiteName") or r.get("ReportingArea") or r.get("AgencyName") or location
         unit = r.get("Unit") or "PPB"
@@ -354,7 +386,8 @@ async def get_airnow_observation(
 
     body.sort(key=lambda x: x.get("distance_miles", 0.0))
 
-    title = f"AirNow Observations - {location}"
+    pollutant_title_part = f" ({target_param})" if target_param else ""
+    title = f"AirNow Observations - {location}{pollutant_title_part}"
     header = [{
         "status": "success",
         "rows": len(body),
@@ -362,8 +395,12 @@ async def get_airnow_observation(
         "latitude": lat,
         "longitude": lon,
         "verified": False,
+        "pollutant": target_param or "ALL",
     }]
-    return _build_artifact_response(header, body, title=title, metadata={"location": location, "query_type": "observation"})
+    meta = {"location": location, "query_type": "observation"}
+    if target_param:
+        meta["pollutant"] = target_param
+    return _build_artifact_response(header, body, title=title, metadata=meta)
 
 
 @tool
@@ -432,7 +469,15 @@ async def get_airnow_area_data(
         start_str = (now_utc - timedelta(hours=3)).strftime("%Y-%m-%dT%H")
         end_str = now_utc.strftime("%Y-%m-%dT%H")
 
-    params_str = parameters if parameters else "O3,PM25,NO2"
+    target_params: set[str] = set()
+    if parameters:
+        for p in parameters.split(","):
+            p_clean = p.strip()
+            if p_clean:
+                norm = _normalize_airnow_param(p_clean)
+                target_params.add(norm if norm else p_clean.upper())
+
+    params_str = ",".join(sorted(target_params)) if target_params else "O3,PM25,NO2"
     query_params = {
         "startDate": start_str,
         "endDate": end_str,
@@ -464,6 +509,9 @@ async def get_airnow_area_data(
             continue
 
         param = r.get("Parameter") or r.get("ParameterName") or "AQI"
+        norm_p = _normalize_airnow_param(param) or param
+        if target_params and norm_p not in target_params:
+            continue
         site_code = _format_aqs_id(r.get("FullAQSCode") or r.get("IntlAQSCode"))
         site_name = r.get("SiteName") or r.get("ReportingArea") or r.get("AgencyName") or "Monitor"
         unit = r.get("Unit") or "PPB"
@@ -513,12 +561,17 @@ async def get_airnow_area_data(
 
     body.sort(key=lambda x: x.get("distance_miles", 0.0))
 
-    title = f"AirNow Regional Stations - {location}"
+    pollutant_title_part = f" ({','.join(sorted(target_params))})" if target_params else ""
+    title = f"AirNow Regional Stations - {location}{pollutant_title_part}"
     header = [{
         "status": "success",
         "rows": len(body),
         "location": location,
         "bbox": bbox,
         "verified": False,
+        "pollutant": ",".join(sorted(target_params)) if target_params else "ALL",
     }]
-    return _build_artifact_response(header, body, title=title, metadata={"location": location, "bbox": bbox, "query_type": "area"})
+    meta = {"location": location, "bbox": bbox, "query_type": "area"}
+    if target_params:
+        meta["parameters"] = ",".join(sorted(target_params))
+    return _build_artifact_response(header, body, title=title, metadata=meta)
