@@ -86,9 +86,9 @@ split it into state_code/county_code/site_number; never pass the literal placeho
       * Certified EPA AQS data is not yet available due to the 2-3 month publication lag.
       * Call `get_airnow_observation(location="...", date=..., distance_miles=15)` for a specific location.
         Use a tight radius (default 10-15 miles) around the requested place to avoid pulling in distant monitors.
-      * MANDATORY DISCLAIMER: Whenever presenting AirNow data, you MUST explicitly state:
-        "Hey, this is not verified data, but this is close to what it will be: [AirNow data]"
-        and explain that AirNow measurements are preliminary near-real-time observations subject to final state validation and EPA certification.
+      * MANDATORY DISCLAIMER: Whenever presenting AirNow data, open with a clear, professional preliminary data notice:
+        "Note: The following measurements are preliminary observations from EPA AirNow (subject to final state quality review and EPA certification):"
+        Explain that certified EPA AQS data has a standard publication lag, so these near-real-time observations are preliminary and indicative.
 
 ## Response Format
 Daily/quarterly/annual summary tools return real period rows for capped sites, with header metadata for total/returned sites and periods.
