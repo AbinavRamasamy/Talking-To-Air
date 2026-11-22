@@ -204,3 +204,34 @@ async def test_airnow_date_older_than_90_days_routes_to_epa_aqs(mock_geocoding, 
         })
         assert res_fb["Header"][0]["status"] == "no_data"
 
+
+@pytest.mark.asyncio
+async def test_airnow_equidistant_three_stations_retained(mock_geocoding, mock_settings):
+    # Geocoded location is at (40.7128, -74.006)
+    # Station 1: ~8.3 mi away
+    # Station 2: ~8.8 mi away
+    # Station 3: ~9.2 mi away
+    # Station 4: ~14.5 mi away
+    mock_data = [
+        {"Latitude": 40.60, "Longitude": -74.05, "Parameter": "O3", "Value": 30.0, "SiteName": "Station A", "FullAQSCode": "340010001"},
+        {"Latitude": 40.60, "Longitude": -74.07, "Parameter": "O3", "Value": 32.0, "SiteName": "Station B", "FullAQSCode": "340010002"},
+        {"Latitude": 40.59, "Longitude": -74.06, "Parameter": "O3", "Value": 34.0, "SiteName": "Station C", "FullAQSCode": "340010003"},
+        {"Latitude": 40.52, "Longitude": -74.08, "Parameter": "O3", "Value": 40.0, "SiteName": "Station D", "FullAQSCode": "340010004"},
+    ]
+
+    with patch("tta_backend.tools.ground_sensor_tools.airnow_tools._fetch_airnow", new_callable=AsyncMock) as mock_fetch, \
+         patch("tta_backend.tools.ground_sensor_tools.airnow_tools.artifact_store.put_table") as mock_put_table:
+        mock_fetch.return_value = mock_data
+        fake_ref = MagicMock(id="tbl_equidistant")
+        fake_ref.model_dump.return_value = {"id": "tbl_equidistant", "type": "table"}
+        mock_put_table.return_value = fake_ref
+
+        res = await get_airnow_observation.ainvoke({"location": "New York, NY", "distance_miles": 20})
+        retained_ids = [r["site_id"] for r in res["Body"]]
+        # Exactly the 3 equidistant stations should be retained, excluding distant Station D
+        assert "34-001-0001" in retained_ids
+        assert "34-001-0002" in retained_ids
+        assert "34-001-0003" in retained_ids
+        assert "34-001-0004" not in retained_ids
+
+

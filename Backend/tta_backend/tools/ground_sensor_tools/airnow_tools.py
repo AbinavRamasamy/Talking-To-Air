@@ -320,12 +320,23 @@ async def get_airnow_observation(
             if aqi_val is not None:
                 grouped[key]["aqis"].append(aqi_val)
 
-    body: list[dict[str, Any]] = []
-    min_dist = min((g["distance_miles"] for g in grouped.values()), default=999.0)
-    max_allowed_dist = 10.0 if min_dist <= 6.0 else radius
+    distinct_sites = sorted(
+        {g["site_id"]: g["distance_miles"] for g in grouped.values()}.items(),
+        key=lambda item: item[1],
+    )
 
+    allowed_site_ids: set[str] = set()
+    if distinct_sites:
+        min_dist = distinct_sites[0][1]
+        for s_id, d in distinct_sites:
+            if d <= min_dist + 4.0:
+                allowed_site_ids.add(s_id)
+            elif len(allowed_site_ids) < 3 and d <= radius and (min_dist > 6.0 or d - min_dist <= 5.0):
+                allowed_site_ids.add(s_id)
+
+    body: list[dict[str, Any]] = []
     for g in grouped.values():
-        if g["distance_miles"] > max_allowed_dist:
+        if g["site_id"] not in allowed_site_ids:
             continue
         vals = g["values"]
         aqis = g["aqis"]
